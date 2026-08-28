@@ -31,6 +31,10 @@ npm run db:generate
 npm run db:migrate
 npm run db:seed     # loads placeholder category data + test identities — see seed.ts header
 npm run dev:api     # starts the Ticketing Core API on :4000
+
+npm run dev --workspace=apps/website           # :5173, needs ?identityId=<id> in the URL
+npm run dev --workspace=apps/resolver-console  # :5174
+npm run dev --workspace=apps/worker            # polls the outbox, no port
 ```
 
 ## API surface built so far
@@ -51,16 +55,56 @@ POST   /api/tickets/:id/attachments      record an uploaded file against a ticke
 GET    /api/categories                   role- and ticketType-gated tree (?role=&ticketType=) — ADR-008
 POST   /api/categories                   admin: create category
 POST   /api/subcategories                admin: create subcategory
+
+GET    /api/identity/:id                 read one identity's webform context (name/role/
+                                          designation/circle/branch) — stand-in for the
+                                          signed-link decode (ADR-002) until JWT auth exists
+GET    /api/resolvers                    list resolvers (?teamId=) — backs the console
+GET    /api/teams                        list teams — backs the console's team picker
 ```
 
 Every ticket mutation writes an `AuditLog` row in the same transaction (append-only, per
 the audit NFR). `isConfidential` on a created ticket is always derived from
-`Category.isConfidential` (ADR-009), never client-supplied. Not yet built, on purpose:
-`/api/webhook/inbound`, `/api/webform/*`, `/api/identity/lookup`, `/api/auth/login` —
-these depend on JWT auth, the Workline sync job, and the Meta Cloud API integration, none
-of which are in scope for this pass. There is also no Postgres RLS enforcement yet — the
-schema supports it (team/department FKs throughout) but enforcement is deferred to JWT
-auth, same as callers filtering explicitly via query params until then.
+`Category.isConfidential` (ADR-009), never client-supplied. A `RESOLVER` reply outside
+WhatsApp's 24hr customer-service window is forced to `channelType: TEMPLATE` regardless
+of what the caller requested (D2/D2b) — checked again at dispatch time by the Outbox
+Worker in case a message sat PENDING long enough for the window to close. Not yet built,
+on purpose: `/api/webhook/inbound`, `/api/webform/*`, `/api/identity/lookup` (the phone-based
+one), `/api/auth/login` — these depend on JWT auth, the Workline sync job, and the Meta
+Cloud API integration, none of which are in scope for this pass. There is also no
+Postgres RLS enforcement yet — the schema supports it (team/department FKs throughout)
+but enforcement is deferred to JWT auth, same as callers filtering explicitly via query
+params until then.
+
+## Frontends and worker built so far
+
+- **`apps/website`** — the "Submit a Grievance" 3-step wizard (ADR-002): Grievance
+  Details → Supporting Documents → Review. Reached via `/?identityId=<id>`, a stand-in
+  for the signed submission link until JWT/webform-token auth exists. Supports both
+  GRIEVANCE and REQUEST ticket types (the latter only offered to REQUEST-eligible
+  roles). Attachments are collected as URLs — real file upload / object storage isn't
+  wired up yet.
+- **`apps/resolver-console`** — queue (filterable by status, with a green/amber/red TAT
+  indicator per Part C), ticket detail with thread, claim, reassign, reply, escalate,
+  and resolve. No login yet — a team + "acting as" resolver picker stands in for a
+  session, same deferred-auth posture as the API.
+- **`apps/worker`** — Outbox Worker skeleton. Polls `Message` rows with
+  `deliveryStatus = PENDING` (that *is* the outbox queue — no separate table needed,
+  the schema already models it this way) and dispatches through a `NotificationSender`
+  interface with one logging stub implementation, swappable for a real Meta Cloud API /
+  email client later without touching the dispatch loop (same reversibility pattern as
+  ADR-003). Re-applies the 24hr-window TEMPLATE check at dispatch time. Retries by
+  simply leaving a failed message PENDING for the next poll cycle; gives up (marks
+  `FAILED` + `deliveryError`) after 15 minutes of failures rather than a persisted
+  attempt counter — a deliberate skeleton-scope simplification.
+- **`packages/design-tokens`** — Part C's color tokens as CSS variables + badge/table/
+  card/SLA-dot component classes, consumed by both frontends.
+
+All three were driven end-to-end against a live local Postgres + API in this pass:
+submit a grievance on the website → it lands in the resolver console's queue → claim →
+reply → escalate/resolve → the worker picks up every outbound message and marks it
+`SENT`, correctly skipping inbound `USER` messages and correctly promoting a
+window-expired reply to `TEMPLATE` at dispatch time.
 
 ## Status (Aug 28)
 
@@ -74,15 +118,23 @@ auth, same as callers filtering explicitly via query params until then.
 - [x] Ticketing Core API (`apps/api`) — tickets + categories routes, ported from
       grievance-101's implementation and corrected for this schema (role-based visibility
       with correct "empty = all roles" semantics, updated ADR-007 REQUEST-eligible role set,
-      category-derived `isConfidential`, `/tickets/mine`, audit log on every mutator)
+      category-derived `isConfidential`, `/tickets/mine`, audit log on every mutator);
+      plus the 24hr WhatsApp-window TEMPLATE fallback on reply, a SYSTEM confirmation
+      message on ticket creation, and small `/api/identity/:id`, `/api/resolvers`,
+      `/api/teams` reads to unblock the frontends below
+- [x] Website submission form (`apps/website`) — 3-step wizard per ADR-002
+- [x] Resolver Console (`apps/resolver-console`) — queue/claim/reply/escalate/reassign/resolve
+- [x] Outbox Worker (`apps/worker`) — polls `Message.deliveryStatus = PENDING`, stub
+      `NotificationSender`, 24hr-window re-check at dispatch, elapsed-time retry/give-up
+- [x] `packages/design-tokens` — Part C tokens, consumed by both frontends
 - [ ] Real category taxonomy (from `Updated_categories_for_new_grievance.xlsx`, reduced per
       the symptom-clubbing rules — not a raw import)
 - [ ] JWT auth + RLS enforcement (Part E step 8 — reuse from the CRM monorepo)
 - [ ] Identity Service (Workline Full + Incremental sync)
-- [ ] WhatsApp Middleware (Meta Cloud API direct — see spec Part D2b)
-- [ ] Resolver Console
-- [ ] Website submission form
-- [ ] Outbox Worker
+- [ ] WhatsApp Middleware (Meta Cloud API direct — see spec Part D2b) — the worker's
+      `NotificationSender` interface is ready to receive this
+- [ ] Admin Console
+- [ ] Real file upload / object storage for attachments (currently URL-only)
 
 Meta Business Verification: not started as of Aug 28. WhatsApp integration will run in
 Meta test mode (temporary number, confirmed recipients only) for the demo — production

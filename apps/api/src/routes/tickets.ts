@@ -8,6 +8,10 @@ export const ticketsRouter = Router();
 // ADR-007 (updated Aug 25): only these roles may raise a REQUEST-type ticket.
 const REQUEST_ELIGIBLE_ROLES = new Set<Role>(["TEAM_LEAD", "TM", "CM", "SBI_DEPUTED"]);
 
+// D2/D2b: WhatsApp's 24hr customer-service window. A RESOLVER message sent outside it
+// must go out as an approved TEMPLATE, not FREETEXT, or Meta will reject the send.
+const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 const OPEN_STATUSES: TicketStatus[] = [
   "NEW",
   "ASSIGNED",
@@ -118,6 +122,19 @@ ticketsRouter.post(
           },
         });
       }
+
+      // Outbound confirmation ("WhatsApp ticket card" + email, per spec A1). This is a
+      // SYSTEM message left PENDING for the Outbox Worker to actually dispatch —
+      // Message.deliveryStatus is the outbox queue (no separate OutboxEvent table
+      // exists in the schema; this is the queue signal the worker polls on).
+      await tx.message.create({
+        data: {
+          ticketId: created.id,
+          senderType: "SYSTEM",
+          body: `Ticket ${created.id} created. We'll notify you here as it progresses.`,
+          channelType: channel === "WEB" ? "TEMPLATE" : "FREETEXT",
+        },
+      });
 
       await tx.auditLog.create({
         data: {
@@ -262,13 +279,22 @@ ticketsRouter.post(
     const ticket = await prisma.ticket.findUnique({ where: { id: req.params.id } });
     if (!ticket) throw new HttpError(404, "Ticket not found");
 
+    // D2/D2b (do-not-cut per the build spec): a RESOLVER reply outside WhatsApp's 24hr
+    // customer-service window must go out as an approved TEMPLATE — Meta rejects a
+    // FREETEXT send otherwise. Forced here regardless of what the caller requested;
+    // USER/SYSTEM messages aren't subject to the window (only outbound-to-user sends are).
+    const outsideWindow =
+      !ticket.lastInboundAt || Date.now() - ticket.lastInboundAt.getTime() > WHATSAPP_WINDOW_MS;
+    const effectiveChannelType =
+      senderType === "RESOLVER" && outsideWindow ? "TEMPLATE" : channelType ?? "FREETEXT";
+
     const message = await prisma.$transaction(async (tx) => {
       const created = await tx.message.create({
         data: {
           ticketId: ticket.id,
           senderType,
           body,
-          channelType: channelType ?? "FREETEXT",
+          channelType: effectiveChannelType,
         },
       });
 
