@@ -91,6 +91,7 @@ model Department {
   name        String     @unique
   categories  Category[]
   teams       Team[]
+  tickets     Ticket[]   // opposite side of Ticket.department — required by Prisma, missing from the spec's verbatim schema
 }
 
 model Category {
