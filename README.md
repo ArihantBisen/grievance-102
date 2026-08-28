@@ -29,7 +29,7 @@ cp packages/db/.env.example packages/db/.env    # fill in real DATABASE_URL
 cp .env.example .env                            # DATABASE_URL + PORT, for apps/api
 npm run db:generate
 npm run db:migrate
-npm run db:seed     # loads placeholder category data + test identities — see seed.ts header
+npm run db:seed     # loads the real (symptom-clubbed) category taxonomy + test identities
 npm run dev:api     # starts the Ticketing Core API on :4000
 
 npm run dev --workspace=apps/website           # :5173, needs ?identityId=<id> in the URL
@@ -112,9 +112,9 @@ window-expired reply to `TEMPLATE` at dispatch time.
 - [x] Prisma schema in place (13 models, 13 enums — matches spec Part D1 exactly; fixed one
       bug in the verbatim copy — `Department` was missing the opposite relation field for
       `Ticket.department`, which Prisma requires)
-- [x] Seed script — real structure, category content still placeholder; now also seeds
-      EscalationContacts, Resolvers, and one test Identity per Role (incl. one INACTIVE, for
-      ADR-010)
+- [x] Seed script — real (symptom-clubbed) category taxonomy from `categoryTaxonomy.ts`
+      (see below), plus EscalationContacts, Resolvers, and one test Identity per Role
+      (incl. one INACTIVE, for ADR-010)
 - [x] Ticketing Core API (`apps/api`) — tickets + categories routes, ported from
       grievance-101's implementation and corrected for this schema (role-based visibility
       with correct "empty = all roles" semantics, updated ADR-007 REQUEST-eligible role set,
@@ -127,8 +127,12 @@ window-expired reply to `TEMPLATE` at dispatch time.
 - [x] Outbox Worker (`apps/worker`) — polls `Message.deliveryStatus = PENDING`, stub
       `NotificationSender`, 24hr-window re-check at dispatch, elapsed-time retry/give-up
 - [x] `packages/design-tokens` — Part C tokens, consumed by both frontends
-- [ ] Real category taxonomy (from `Updated_categories_for_new_grievance.xlsx`, reduced per
-      the symptom-clubbing rules — not a raw import)
+- [x] Real category taxonomy (`packages/db/src/categoryTaxonomy.ts`) — reduced from
+      `Updated_categories_for_new_grievance.xlsx` (Off-Roll, onroll, HR partners, SBI
+      sheets), symptom-clubbed from ~83 raw rows to a real, scannable tree; see that
+      file's header comment for the full methodology, what's real vs. synthetic
+      (Harassment/Conduct and Sanction Status Check have no source row), and the known
+      gaps (no TAT data in the source, no Role-enum value for HR-partner vendor staff)
 - [ ] JWT auth + RLS enforcement (Part E step 8 — reuse from the CRM monorepo)
 - [ ] Identity Service (Workline Full + Incremental sync)
 - [ ] WhatsApp Middleware (Meta Cloud API direct — see spec Part D2b) — the worker's
