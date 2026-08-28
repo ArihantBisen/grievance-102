@@ -22,65 +22,77 @@ export async function dispatchPendingMessages(sender: NotificationSender): Promi
   failed: number;
   gaveUp: number;
 }> {
-  const pending = await prisma.message.findMany({
-    where: {
-      deliveryStatus: "PENDING",
-      senderType: { in: ["RESOLVER", "SYSTEM"] },
-    },
-    include: { ticket: { include: { identity: true } } },
-    orderBy: { sentAt: "asc" },
-    take: 50,
-  });
+  // Message (and Ticket) are RLS-protected (packages/db's row-level-security
+  // migration) — the worker is a trusted system process with no resolver session of
+  // its own, so it runs with the same admin bypass apps/api's withSystemRls uses for
+  // citizen-facing routes. Without this, every query here would silently return zero
+  // rows rather than erroring, which is exactly the bug this comment is here to
+  // prevent reintroducing.
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.current_team_id', '', true)`;
+    await tx.$executeRaw`SELECT set_config('app.is_admin', 'true', true)`;
 
-  let dispatched = 0;
-  let failed = 0;
-  let gaveUp = 0;
+    const pending = await tx.message.findMany({
+      where: {
+        deliveryStatus: "PENDING",
+        senderType: { in: ["RESOLVER", "SYSTEM"] },
+      },
+      include: { ticket: { include: { identity: true } } },
+      orderBy: { sentAt: "asc" },
+      take: 50,
+    });
 
-  for (const message of pending) {
-    const { ticket } = message;
-    const outsideWindow =
-      !ticket.lastInboundAt || Date.now() - ticket.lastInboundAt.getTime() > WHATSAPP_WINDOW_MS;
-    const effectiveChannelType = outsideWindow ? "TEMPLATE" : message.channelType;
+    let dispatched = 0;
+    let failed = 0;
+    let gaveUp = 0;
 
-    try {
-      await sender.send({
-        ticketId: ticket.id,
-        channel: ticket.channel,
-        messageChannelType: effectiveChannelType,
-        body: message.body,
-        toPhoneNumber: ticket.identity.personalMobileNo ?? ticket.identity.officeMobileNo,
-      });
+    for (const message of pending) {
+      const { ticket } = message;
+      const outsideWindow =
+        !ticket.lastInboundAt || Date.now() - ticket.lastInboundAt.getTime() > WHATSAPP_WINDOW_MS;
+      const effectiveChannelType = outsideWindow ? "TEMPLATE" : message.channelType;
 
-      await prisma.message.update({
-        where: { id: message.id },
-        data: {
-          deliveryStatus: "SENT",
-          channelType: effectiveChannelType,
-          deliveryError: null,
-        },
-      });
-      dispatched++;
-    } catch (err) {
-      const errorText = err instanceof Error ? err.message : String(err);
-      const ageMs = Date.now() - message.sentAt.getTime();
-
-      if (ageMs > RETRY_GIVEUP_MS) {
-        await prisma.message.update({
-          where: { id: message.id },
-          data: { deliveryStatus: "FAILED", deliveryError: errorText },
+      try {
+        await sender.send({
+          ticketId: ticket.id,
+          channel: ticket.channel,
+          messageChannelType: effectiveChannelType,
+          body: message.body,
+          toPhoneNumber: ticket.identity.personalMobileNo ?? ticket.identity.officeMobileNo,
         });
-        gaveUp++;
-      } else {
-        // Left PENDING — picked up again next poll cycle. Record the error so ops can
-        // see why it hasn't gone out yet without flipping it to FAILED prematurely.
-        await prisma.message.update({
+
+        await tx.message.update({
           where: { id: message.id },
-          data: { deliveryError: errorText },
+          data: {
+            deliveryStatus: "SENT",
+            channelType: effectiveChannelType,
+            deliveryError: null,
+          },
         });
-        failed++;
+        dispatched++;
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : String(err);
+        const ageMs = Date.now() - message.sentAt.getTime();
+
+        if (ageMs > RETRY_GIVEUP_MS) {
+          await tx.message.update({
+            where: { id: message.id },
+            data: { deliveryStatus: "FAILED", deliveryError: errorText },
+          });
+          gaveUp++;
+        } else {
+          // Left PENDING — picked up again next poll cycle. Record the error so ops
+          // can see why it hasn't gone out yet without flipping it to FAILED
+          // prematurely.
+          await tx.message.update({
+            where: { id: message.id },
+            data: { deliveryError: errorText },
+          });
+          failed++;
+        }
       }
     }
-  }
 
-  return { dispatched, failed, gaveUp };
+    return { dispatched, failed, gaveUp };
+  });
 }

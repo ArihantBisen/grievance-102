@@ -6,9 +6,15 @@
 // Role.
 
 import { PrismaClient, Role, EmploymentStatus } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import { categoryTaxonomy } from './categoryTaxonomy';
 
 const prisma = new PrismaClient();
+
+// Dev-only placeholder password for every seeded resolver/admin login — never used
+// outside a local/demo database. Real credentials are a Part E step 8 concern (this
+// pass built JWT auth fresh, with no CRM monorepo available to reuse from).
+const DEV_PASSWORD_HASH = bcrypt.hashSync('sboss-dev-2026', 10);
 
 async function main() {
   console.log('Seeding SBOSS Grievance System...');
@@ -95,14 +101,22 @@ async function main() {
     }
   }
 
-  // ---- Resolvers (placeholder — real roster TBD) ----
+  // ---- Resolvers (placeholder — real roster TBD). All log in with password
+  // "sboss-dev-2026" (DEV_PASSWORD_HASH above) — dev/demo only. ----
   await prisma.resolver.createMany({
     data: [
-      { name: 'Asha Rao', email: 'asha.rao@sboss.example', teamId: itTeam.id },
-      { name: 'Vikram Shah', email: 'vikram.shah@sboss.example', teamId: hrGeneralTeam.id },
-      { name: 'Committee Lead', email: 'hr-committee-lead@sboss.example', teamId: hrConfidentialTeam.id },
-      { name: 'Rakesh Iyer', email: 'rakesh.iyer@sboss.example', teamId: businessTeam.id },
-      { name: 'Meera Pillai', email: 'meera.pillai@sboss.example', teamId: financeTeam.id },
+      { name: 'Asha Rao', email: 'asha.rao@sboss.example', teamId: itTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Vikram Shah', email: 'vikram.shah@sboss.example', teamId: hrGeneralTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Committee Lead', email: 'hr-committee-lead@sboss.example', teamId: hrConfidentialTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Rakesh Iyer', email: 'rakesh.iyer@sboss.example', teamId: businessTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Meera Pillai', email: 'meera.pillai@sboss.example', teamId: financeTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      {
+        name: 'SBOSS Admin',
+        email: 'admin@sboss.example',
+        teamId: itTeam.id, // isAdmin bypasses team-scoped RLS — team assignment here is required by schema, not meaningful
+        passwordHash: DEV_PASSWORD_HASH,
+        isAdmin: true,
+      },
     ],
   });
 
@@ -149,6 +163,40 @@ async function main() {
       },
     });
   }
+
+  // ---- One open ticket belonging to the INACTIVE identity (ADR-010) — otherwise the
+  // Admin Console's "tickets requiring reassignment" queue has nothing to show. ----
+  const inactiveIdentity = await prisma.identity.findUniqueOrThrow({ where: { externalId: 'EMP1008' } });
+  const loginSubcategory = await prisma.subcategory.findFirstOrThrow({
+    where: { name: 'Login / Access Issue', category: { name: 'SBOSS Assist App' } },
+    include: { category: true },
+  });
+  // Ticket is RLS-protected (packages/db's row-level-security migration) — a plain
+  // insert with no session context set is correctly rejected, so this runs the same
+  // admin-bypass session vars the API's withSystemRls helper sets per-request.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.current_team_id', '', true)`;
+    await tx.$executeRaw`SELECT set_config('app.is_admin', 'true', true)`;
+    await tx.ticket.create({
+    data: {
+      identityId: inactiveIdentity.id,
+      departmentId: loginSubcategory.category.departmentId,
+      categoryId: loginSubcategory.categoryId,
+      subcategoryId: loginSubcategory.id,
+      teamId: loginSubcategory.resolverTeamId,
+      channel: 'WHATSAPP',
+      tatDueAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      lastInboundAt: now,
+      messages: {
+        create: {
+          senderType: 'USER',
+          body: 'Still unable to log in to the Assist app.',
+          channelType: 'FREETEXT',
+        },
+      },
+    },
+    });
+  });
 
   console.log('Seed complete — real (symptom-clubbed) category taxonomy loaded from categoryTaxonomy.ts.');
 }

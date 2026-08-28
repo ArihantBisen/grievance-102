@@ -14,6 +14,7 @@ export interface Resolver {
   email: string;
   teamId: string;
   presenceStatus: "ONLINE" | "OFFLINE" | "AWAY";
+  isAdmin: boolean;
 }
 
 export interface TicketListItem {

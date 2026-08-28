@@ -26,16 +26,22 @@ infra/               — Deployment config (pending hosting/data-residency decis
 ```bash
 npm install
 cp packages/db/.env.example packages/db/.env    # fill in real DATABASE_URL
-cp .env.example .env                            # DATABASE_URL + PORT, for apps/api
+cp .env.example .env                            # DATABASE_URL + PORT + JWT_SECRET, for apps/api
 npm run db:generate
 npm run db:migrate
-npm run db:seed     # loads the real (symptom-clubbed) category taxonomy + test identities
+npm run db:seed     # loads the real (symptom-clubbed) category taxonomy + test identities/resolvers
 npm run dev:api     # starts the Ticketing Core API on :4000
 
 npm run dev --workspace=apps/website           # :5173, needs ?identityId=<id> in the URL
-npm run dev --workspace=apps/resolver-console  # :5174
+npm run dev --workspace=apps/resolver-console  # :5174, login required
+npm run dev --workspace=apps/admin-console     # :5175, admin login required
 npm run dev --workspace=apps/worker            # polls the outbox, no port
 ```
+
+Every seeded resolver (including the admin) logs in with password `sboss-dev-2026` —
+dev/demo only, see `packages/db/src/seed.ts`. The admin account is `admin@sboss.example`;
+a non-admin (e.g. `asha.rao@sboss.example`) can sign into the Resolver Console but is
+rejected by the Admin Console's login screen.
 
 ## API surface built so far
 
@@ -54,13 +60,28 @@ POST   /api/tickets/:id/attachments      record an uploaded file against a ticke
 
 GET    /api/categories                   role- and ticketType-gated tree (?role=&ticketType=) — ADR-008
 POST   /api/categories                   admin: create category
+PATCH  /api/categories/:id               admin: edit TAT / confidentiality / escalation contact
 POST   /api/subcategories                admin: create subcategory
+PATCH  /api/subcategories/:id            admin: edit roleVisibility / resolver team / TAT override
 
 GET    /api/identity/:id                 read one identity's webform context (name/role/
                                           designation/circle/branch) — stand-in for the
-                                          signed-link decode (ADR-002) until JWT auth exists
-GET    /api/resolvers                    list resolvers (?teamId=) — backs the console
-GET    /api/teams                        list teams — backs the console's team picker
+                                          signed-link decode (ADR-002) until JWT-based
+                                          citizen auth exists (JWT auth itself now
+                                          exists, but only for the resolver/admin console)
+GET    /api/resolvers                    list resolvers (?teamId=) — auth required
+POST   /api/resolvers                    admin: create a resolver
+PATCH  /api/resolvers/:id                admin: reassign team / grant-revoke admin
+GET    /api/teams                        list teams — auth required
+POST   /api/teams                        admin: create a team
+
+POST   /api/auth/login                   resolver/admin login -> { token, resolver }
+GET    /api/admin/identities             admin: list/filter identities
+PATCH  /api/admin/identities/:id/role    admin: override role (ADR-006 D2a's roleClassifiedBy)
+GET    /api/admin/unknown-contacts       admin: ADR-011's review log (?reviewed=)
+PATCH  /api/admin/unknown-contacts/:id   admin: mark reviewed
+GET    /api/admin/orphaned-tickets       admin: ADR-010's supervisor-reassignment queue
+GET    /api/admin/sync-runs              admin: Workline SyncRun history
 ```
 
 Every ticket mutation writes an `AuditLog` row in the same transaction (append-only, per
@@ -68,13 +89,30 @@ the audit NFR). `isConfidential` on a created ticket is always derived from
 `Category.isConfidential` (ADR-009), never client-supplied. A `RESOLVER` reply outside
 WhatsApp's 24hr customer-service window is forced to `channelType: TEMPLATE` regardless
 of what the caller requested (D2/D2b) — checked again at dispatch time by the Outbox
-Worker in case a message sat PENDING long enough for the window to close. Not yet built,
-on purpose: `/api/webhook/inbound`, `/api/webform/*`, `/api/identity/lookup` (the phone-based
-one), `/api/auth/login` — these depend on JWT auth, the Workline sync job, and the Meta
-Cloud API integration, none of which are in scope for this pass. There is also no
-Postgres RLS enforcement yet — the schema supports it (team/department FKs throughout)
-but enforcement is deferred to JWT auth, same as callers filtering explicitly via query
-params until then.
+Worker in case a message sat PENDING long enough for the window to close.
+
+**JWT auth + Postgres RLS (Part E step 8) are now built** — fresh, not ported: the CRM
+monorepo the spec says to reuse this from wasn't locatable this session. `Resolver`
+gained `passwordHash` + `isAdmin`; `POST /api/auth/login` issues an 8h JWT carrying
+`{sub, email, name, teamId, isAdmin}`. `requireAuth`/`requireAdmin`
+(`apps/api/src/middleware/auth.ts`) gate the resolver/admin-only routes above.
+Real Postgres RLS (not just app-level filtering) is enabled with `FORCE ROW LEVEL
+SECURITY` on `Ticket`/`Message`/`Attachment`/`AuditLog`
+(`packages/db/prisma/migrations/.../add_row_level_security`), keyed off
+`app.current_team_id`/`app.is_admin` session variables that
+`apps/api/src/lib/rls.ts`'s `withRlsContext`/`withSystemRls` set per-request inside a
+transaction. A resolver's session can only see their own team's rows; ADR-009's
+confidentiality wall falls out of that for free, with no separate check, since a
+confidential ticket's team is always the HR-Confidential-Committee team. Citizen-facing
+routes (ticket creation, `/tickets/mine`, the category tree, the identity read) run
+with the admin bypass (`withSystemRls`) since they have no resolver session to scope by.
+The Outbox Worker also needs this bypass for its own queries — an easy bug to
+reintroduce if a new query is added there without going through it (see
+`apps/worker/src/dispatch.ts`'s comment).
+
+Still not built, on purpose: `/api/webhook/inbound`, `/api/webform/*`, the phone-based
+`/api/identity/lookup` — these depend on the Workline sync job and the Meta Cloud API
+integration, neither in scope for this pass.
 
 ## Frontends and worker built so far
 
@@ -84,10 +122,22 @@ params until then.
   GRIEVANCE and REQUEST ticket types (the latter only offered to REQUEST-eligible
   roles). Attachments are collected as URLs — real file upload / object storage isn't
   wired up yet.
-- **`apps/resolver-console`** — queue (filterable by status, with a green/amber/red TAT
-  indicator per Part C), ticket detail with thread, claim, reassign, reply, escalate,
-  and resolve. No login yet — a team + "acting as" resolver picker stands in for a
-  session, same deferred-auth posture as the API.
+- **`apps/resolver-console`** — real JWT login now (was a team + "acting as" picker in
+  the previous pass). Queue (filterable by status, with a green/amber/red TAT indicator
+  per Part C, RLS-scoped to the logged-in resolver's own team — an admin gets a team
+  filter dropdown since they bypass that scoping), ticket detail with thread, claim,
+  reassign, reply, escalate, and resolve. `actor` on every mutation now comes from the
+  verified JWT, not a client-supplied field.
+- **`apps/admin-console`** — new this pass, admin-JWT-gated (ADR-004's "category tree,
+  TAT policy, resolver/team mapping"). Four tabs: **Category Tree** (inline TAT-hours
+  editing, confidentiality toggle, and an ADR-008 role-visibility matrix — click a role
+  chip to toggle a subcategory's visibility for that role); **Resolvers & Teams** (add a
+  resolver, reassign a resolver's team, grant/revoke admin); **Identities** (search/filter,
+  inline role override per D2a, showing whether a role was sync- or admin-classified);
+  **Ops** (ADR-010's orphaned-ticket/reassignment queue — populated via a seeded demo
+  ticket so it's not empty on a fresh DB; ADR-011's unknown-contact review log and the
+  Workline SyncRun history, both correctly empty until the Identity Service/WhatsApp
+  Middleware exist to populate them).
 - **`apps/worker`** — Outbox Worker skeleton. Polls `Message` rows with
   `deliveryStatus = PENDING` (that *is* the outbox queue — no separate table needed,
   the schema already models it this way) and dispatches through a `NotificationSender`
@@ -100,11 +150,18 @@ params until then.
 - **`packages/design-tokens`** — Part C's color tokens as CSS variables + badge/table/
   card/SLA-dot component classes, consumed by both frontends.
 
-All three were driven end-to-end against a live local Postgres + API in this pass:
-submit a grievance on the website → it lands in the resolver console's queue → claim →
-reply → escalate/resolve → the worker picks up every outbound message and marks it
-`SENT`, correctly skipping inbound `USER` messages and correctly promoting a
-window-expired reply to `TEMPLATE` at dispatch time.
+All four were driven end-to-end with Playwright against a live local Postgres + API:
+submit a grievance on the website → it lands in the resolver console's queue → sign in
+→ claim → reply → escalate/resolve → the worker dispatches every outbound message and
+marks it `SENT`, correctly skipping inbound `USER` messages and correctly promoting a
+window-expired reply to `TEMPLATE` at dispatch time. Also verified directly against the
+API: a resolver's session only ever returns their own team's tickets regardless of what
+teamId they request (RLS, not just app-layer trust); a non-committee HR resolver and an
+unrelated-department resolver both get 404 on a confidential ticket while the committee
+resolver and an admin can see it; a non-admin gets 403 from every `/api/admin/*` route
+and the Admin Console's own login screen; wrong password is rejected; an admin's
+category-tree edits (TAT hours, role-visibility toggle) persist and are reflected back
+through the citizen-facing `GET /api/categories`.
 
 ## Status (Aug 28)
 
@@ -126,19 +183,26 @@ window-expired reply to `TEMPLATE` at dispatch time.
 - [x] Resolver Console (`apps/resolver-console`) — queue/claim/reply/escalate/reassign/resolve
 - [x] Outbox Worker (`apps/worker`) — polls `Message.deliveryStatus = PENDING`, stub
       `NotificationSender`, 24hr-window re-check at dispatch, elapsed-time retry/give-up
-- [x] `packages/design-tokens` — Part C tokens, consumed by both frontends
+- [x] `packages/design-tokens` — Part C tokens, consumed by all three frontends
 - [x] Real category taxonomy (`packages/db/src/categoryTaxonomy.ts`) — reduced from
       `Updated_categories_for_new_grievance.xlsx` (Off-Roll, onroll, HR partners, SBI
       sheets), symptom-clubbed from ~83 raw rows to a real, scannable tree; see that
       file's header comment for the full methodology, what's real vs. synthetic
       (Harassment/Conduct and Sanction Status Check have no source row), and the known
       gaps (no TAT data in the source, no Role-enum value for HR-partner vendor staff)
-- [ ] JWT auth + RLS enforcement (Part E step 8 — reuse from the CRM monorepo)
+- [x] JWT auth + Postgres RLS (Part E step 8) — built fresh (no CRM monorepo was
+      reachable this session to reuse it from, as the spec directs); real
+      `FORCE ROW LEVEL SECURITY` policies, not app-layer filtering — see the section
+      above and `packages/db/prisma/migrations/.../add_row_level_security`
+- [x] Admin Console (`apps/admin-console`) — category tree/TAT/role-visibility editing,
+      resolver/team mapping, identity role override, orphaned-ticket queue,
+      unknown-contact review, sync-run history
 - [ ] Identity Service (Workline Full + Incremental sync)
 - [ ] WhatsApp Middleware (Meta Cloud API direct — see spec Part D2b) — the worker's
       `NotificationSender` interface is ready to receive this
-- [ ] Admin Console
 - [ ] Real file upload / object storage for attachments (currently URL-only)
+- [ ] Real resolver roster / real TAT hours / real per-vendor HR-partner routing —
+      still placeholders pending sign-off from the relevant department heads
 
 Meta Business Verification: not started as of Aug 28. WhatsApp integration will run in
 Meta test mode (temporary number, confirmed recipients only) for the demo — production

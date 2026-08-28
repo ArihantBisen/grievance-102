@@ -1,12 +1,11 @@
 import { useState } from "react";
-import type { Resolver, Team, TicketDetail as TicketDetailType } from "../types";
+import type { Team, TicketDetail as TicketDetailType } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { SlaIndicator } from "./SlaIndicator";
 
 interface Props {
   ticket: TicketDetailType;
   teams: Team[];
-  actingResolver: Resolver | null;
   onClaim: () => void;
   onReassign: (teamId: string) => void;
   onReply: (body: string) => void;
@@ -18,7 +17,6 @@ interface Props {
 export function TicketDetail({
   ticket,
   teams,
-  actingResolver,
   onClaim,
   onReassign,
   onReply,
@@ -58,7 +56,7 @@ export function TicketDetail({
       </div>
 
       <div className="action-bar">
-        <button className="btn" onClick={onClaim} disabled={busy || !actingResolver || ticket.resolverId === actingResolver?.id}>
+        <button className="btn" onClick={onClaim} disabled={busy || Boolean(ticket.resolver)}>
           {ticket.resolver ? `Claimed: ${ticket.resolver.name}` : "Claim"}
         </button>
 
