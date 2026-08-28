@@ -2,16 +2,23 @@ import { Router } from "express";
 import type { Role, TicketType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { asyncHandler, HttpError } from "../lib/asyncHandler";
+import { requireAdmin, requireAuth } from "../middleware/auth";
 
 export const categoriesRouter = Router();
+
+// Category/Subcategory aren't RLS-protected tables (only Ticket/Message/Attachment/
+// AuditLog are — see packages/db's row-level-security migration) — they're the shared
+// menu every role reads from, just filtered by role in the query itself, so these
+// routes use the plain `prisma` client throughout, no withRlsContext needed.
 
 // GET /api/categories?role=&ticketType= — role-gated tree per ADR-008. ticketType lets
 // callers ask for the FOS-level grievance tree (default) or the lighter Request set
 // (ADR-007) without the two blurring together. A Subcategory with an empty
 // roleVisibility array is visible to every role (schema-documented default) — the
 // filter below is an OR, not a plain `has`, specifically so that "visible to all"
-// case isn't wrongly excluded once a role filter is applied. Omit role for the
-// admin/unfiltered view (spec D2).
+// case isn't wrongly excluded once a role filter is applied. Citizen-facing (the
+// website's category picker) — no auth required. Omit role for the admin/unfiltered
+// view (spec D2).
 categoriesRouter.get(
   "/categories",
   asyncHandler(async (req, res) => {
@@ -49,6 +56,8 @@ categoriesRouter.get(
 // POST /api/categories — admin: create category
 categoriesRouter.post(
   "/categories",
+  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const {
       departmentId,
@@ -80,9 +89,32 @@ categoriesRouter.post(
   })
 );
 
+// PATCH /api/categories/:id — admin: edit TAT policy / confidentiality / escalation
+// contact (ADR-005's "TAT policy changes are a ~20-row edit" — this is that edit).
+categoriesRouter.patch(
+  "/categories/:id",
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { defaultTatHours, escalationContactId, requiresWebForm, isConfidential } = req.body ?? {};
+    const data: Record<string, unknown> = {};
+    if (typeof defaultTatHours === "number") data.defaultTatHours = defaultTatHours;
+    if (escalationContactId !== undefined) data.escalationContactId = escalationContactId;
+    if (typeof requiresWebForm === "boolean") data.requiresWebForm = requiresWebForm;
+    if (typeof isConfidential === "boolean") data.isConfidential = isConfidential;
+
+    if (Object.keys(data).length === 0) throw new HttpError(400, "No recognized fields to update");
+
+    const category = await prisma.category.update({ where: { id: req.params.id }, data });
+    res.json(category);
+  })
+);
+
 // POST /api/subcategories — admin: create subcategory (includes roleVisibility, ADR-008)
 categoriesRouter.post(
   "/subcategories",
+  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { categoryId, name, roleVisibility, resolverTeamId, tatHoursOverride } = req.body ?? {};
 
@@ -104,5 +136,25 @@ categoriesRouter.post(
     });
 
     res.status(201).json(subcategory);
+  })
+);
+
+// PATCH /api/subcategories/:id — admin: edit roleVisibility (ADR-008's matrix editor),
+// resolver team, or TAT override.
+categoriesRouter.patch(
+  "/subcategories/:id",
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { roleVisibility, resolverTeamId, tatHoursOverride } = req.body ?? {};
+    const data: Record<string, unknown> = {};
+    if (Array.isArray(roleVisibility)) data.roleVisibility = roleVisibility;
+    if (resolverTeamId) data.resolverTeamId = resolverTeamId;
+    if (tatHoursOverride !== undefined) data.tatHoursOverride = tatHoursOverride;
+
+    if (Object.keys(data).length === 0) throw new HttpError(400, "No recognized fields to update");
+
+    const subcategory = await prisma.subcategory.update({ where: { id: req.params.id }, data });
+    res.json(subcategory);
   })
 );

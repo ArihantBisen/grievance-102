@@ -21,6 +21,9 @@ model Identity {
   officeMobileNo       String?           @unique  // fallback — empty in every real record seen so far, but kept for other segments
   name                 String
   role                 Role              @default(OTHER)  // classified from designation at sync time — see D2a
+  roleClassifiedBy     String            @default("sync") // "sync" | "admin" — an admin override (D2's PATCH
+                                                            // /api/admin/identities/:id/role) is preserved across
+                                                            // subsequent syncs by checking this before reclassifying
   designation          String?
   department           String?           // from Workline's `unit` / `function` — NOT `legalEntity`
   circle               String?           // Workline's `circle` field directly — shown on the web form, used for routing/context, promoted to a real column per the grievance-portal wireframe
@@ -139,6 +142,10 @@ model Resolver {
   id              String            @id @default(cuid())
   name            String
   email           String            @unique
+  passwordHash    String            // bcrypt — Part E step 8 (JWT auth). No CRM monorepo
+                                     // was available to reuse in this pass, so this is a
+                                     // fresh, minimal implementation, not a port.
+  isAdmin         Boolean           @default(false) // bypasses team-scoped RLS; gates admin-only routes
   teamId          String
   team            Team              @relation(fields: [teamId], references: [id])
   presenceStatus  PresenceStatus    @default(OFFLINE)

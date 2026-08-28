@@ -1,40 +1,34 @@
 // SBOSS Grievance & Request System — database seed
-// Fills: Department -> Category -> Subcategory tree, EscalationContacts, Teams,
-// Resolvers, and a handful of test Identities covering every Role.
-// Real category data comes from Updated_categories_for_new_grievance.xlsx, reduced per the
-// symptom-clubbing rules already agreed (see build spec Part E, step 3) — NOT a raw import.
-// This file is scaffolding: structure is real, category content is placeholder until the
-// reduced taxonomy is finalized and dropped in here.
+// Fills: Department -> Category -> Subcategory tree (from categoryTaxonomy.ts — real,
+// symptom-clubbed data reduced from Updated_categories_for_new_grievance.xlsx, see that
+// file's header for the full methodology and what's real vs. deliberately synthetic),
+// Teams, EscalationContacts, Resolvers, and a handful of test Identities covering every
+// Role.
 
-import { PrismaClient, TicketType, Role, EmploymentStatus } from '@prisma/client';
+import { PrismaClient, Role, EmploymentStatus } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+import { categoryTaxonomy } from './categoryTaxonomy';
 
 const prisma = new PrismaClient();
+
+// Dev-only placeholder password for every seeded resolver/admin login — never used
+// outside a local/demo database. Real credentials are a Part E step 8 concern (this
+// pass built JWT auth fresh, with no CRM monorepo available to reuse from).
+const DEV_PASSWORD_HASH = bcrypt.hashSync('sboss-dev-2026', 10);
 
 async function main() {
   console.log('Seeding SBOSS Grievance System...');
 
   // ---- Departments ----
+  const departmentNames = Array.from(new Set(categoryTaxonomy.map((d) => d.name)));
   const departments = await Promise.all(
-    ['IT', 'HR', 'Business', 'Finance', 'Admin'].map((name) =>
-      prisma.department.upsert({
-        where: { name },
-        update: {},
-        create: { name },
-      })
+    departmentNames.map((name) =>
+      prisma.department.upsert({ where: { name }, update: {}, create: { name } })
     )
   );
   const deptByName = Object.fromEntries(departments.map((d) => [d.name, d]));
 
-  // ---- Escalation contacts (placeholder addresses — real HR committee contacts still
-  // to be collected, see ADR-009 action item 1) ----
-  const itEscalation = await prisma.escalationContact.create({
-    data: { email: 'it-escalation@sboss.example', level: 1 },
-  });
-  const hrConfidentialEscalation = await prisma.escalationContact.create({
-    data: { email: 'hr-committee-lead@sboss.example', level: 1 },
-  });
-
-  // ---- Teams (including the HR-confidential committee team, per ADR-009) ----
+  // ---- Teams (keyed by the taxonomy's teamKey) ----
   const itTeam = await prisma.team.create({
     data: { name: 'IT — App Support', departmentId: deptByName['IT'].id },
   });
@@ -48,72 +42,82 @@ async function main() {
       isConfidential: true, // ADR-009: separate from hrGeneralTeam, RLS-restricted to committee members only
     },
   });
+  const businessTeam = await prisma.team.create({
+    data: { name: 'Business — Field Ops', departmentId: deptByName['Business'].id },
+  });
+  const financeTeam = await prisma.team.create({
+    data: { name: 'Finance — Accounts', departmentId: deptByName['Finance'].id },
+  });
 
-  // ---- Resolvers (placeholder — real roster TBD) ----
+  const teamsByKey: Record<string, { id: string }> = {
+    it: itTeam,
+    hrGeneral: hrGeneralTeam,
+    hrConfidential: hrConfidentialTeam,
+    business: businessTeam,
+    finance: financeTeam,
+  };
+
+  // ---- Category tree, built from categoryTaxonomy.ts ----
+  // EscalationContact has no unique constraint on email, so contacts shared across
+  // categories (a department's general contact, reused for several category groups)
+  // are deduped within this run rather than creating a duplicate row per category.
+  const escalationContactByEmail = new Map<string, string>();
+  async function escalationContactId(email: string | undefined): Promise<string | undefined> {
+    if (!email) return undefined;
+    const cached = escalationContactByEmail.get(email);
+    if (cached) return cached;
+    const contact = await prisma.escalationContact.create({ data: { email, level: 1 } });
+    escalationContactByEmail.set(email, contact.id);
+    return contact.id;
+  }
+
+  for (const dept of categoryTaxonomy) {
+    const department = deptByName[dept.name];
+    for (const cat of dept.categories) {
+      const contactId = await escalationContactId(cat.escalationEmail);
+      const category = await prisma.category.create({
+        data: {
+          name: cat.name,
+          departmentId: department.id,
+          ticketType: cat.ticketType,
+          defaultTatHours: cat.defaultTatHours,
+          isConfidential: cat.isConfidential ?? false,
+          requiresWebForm: cat.requiresWebForm ?? false,
+          escalationContactId: contactId ?? null,
+        },
+      });
+      const team = teamsByKey[cat.teamKey];
+      for (const sub of cat.subcategories) {
+        await prisma.subcategory.create({
+          data: {
+            name: sub.name,
+            categoryId: category.id,
+            resolverTeamId: team.id,
+            roleVisibility: sub.roleVisibility,
+            tatHoursOverride: sub.tatHoursOverride ?? null,
+          },
+        });
+      }
+    }
+  }
+
+  // ---- Resolvers (placeholder — real roster TBD). All log in with password
+  // "sboss-dev-2026" (DEV_PASSWORD_HASH above) — dev/demo only. ----
   await prisma.resolver.createMany({
     data: [
-      { name: 'Asha Rao', email: 'asha.rao@sboss.example', teamId: itTeam.id },
-      { name: 'Vikram Shah', email: 'vikram.shah@sboss.example', teamId: hrGeneralTeam.id },
-      { name: 'Committee Lead', email: 'hr-committee-lead@sboss.example', teamId: hrConfidentialTeam.id },
+      { name: 'Asha Rao', email: 'asha.rao@sboss.example', teamId: itTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Vikram Shah', email: 'vikram.shah@sboss.example', teamId: hrGeneralTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Committee Lead', email: 'hr-committee-lead@sboss.example', teamId: hrConfidentialTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Rakesh Iyer', email: 'rakesh.iyer@sboss.example', teamId: businessTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      { name: 'Meera Pillai', email: 'meera.pillai@sboss.example', teamId: financeTeam.id, passwordHash: DEV_PASSWORD_HASH },
+      {
+        name: 'SBOSS Admin',
+        email: 'admin@sboss.example',
+        teamId: itTeam.id, // isAdmin bypasses team-scoped RLS — team assignment here is required by schema, not meaningful
+        passwordHash: DEV_PASSWORD_HASH,
+        isAdmin: true,
+      },
     ],
-  });
-
-  // ---- Example Category + Subcategory (placeholder — replace with real reduced taxonomy) ----
-  const loginCategory = await prisma.category.create({
-    data: {
-      name: 'SBOSS Assist App',
-      departmentId: deptByName['IT'].id,
-      ticketType: TicketType.GRIEVANCE,
-      defaultTatHours: 24,
-      requiresWebForm: false,
-      escalationContactId: itEscalation.id,
-    },
-  });
-  await prisma.subcategory.create({
-    data: {
-      name: 'Unable to Login',
-      categoryId: loginCategory.id,
-      resolverTeamId: itTeam.id,
-      roleVisibility: [], // empty = visible to all roles
-    },
-  });
-
-  // ---- Example HR-confidential category (ADR-009) ----
-  const conductCategory = await prisma.category.create({
-    data: {
-      name: 'Harassment / Conduct',
-      departmentId: deptByName['HR'].id,
-      ticketType: TicketType.GRIEVANCE,
-      defaultTatHours: 48,
-      isConfidential: true,
-      escalationContactId: hrConfidentialEscalation.id,
-    },
-  });
-  await prisma.subcategory.create({
-    data: {
-      name: 'Workplace Conduct Concern',
-      categoryId: conductCategory.id,
-      resolverTeamId: hrConfidentialTeam.id,
-      roleVisibility: [],
-    },
-  });
-
-  // ---- Example Request category (ADR-007) — separate, lighter tree, role-gated ----
-  const requestCategory = await prisma.category.create({
-    data: {
-      name: 'Sanction Status Check',
-      departmentId: deptByName['Business'].id,
-      ticketType: TicketType.REQUEST,
-      defaultTatHours: 12,
-    },
-  });
-  await prisma.subcategory.create({
-    data: {
-      name: 'Case Status Inquiry',
-      categoryId: requestCategory.id,
-      resolverTeamId: itTeam.id, // placeholder — real routing TBD
-      roleVisibility: [Role.TEAM_LEAD, Role.TM, Role.CM, Role.SBI_DEPUTED],
-    },
   });
 
   // ---- Test identities — one per Role, plus one INACTIVE (ADR-010), to exercise the
@@ -160,7 +164,41 @@ async function main() {
     });
   }
 
-  console.log('Seed complete (placeholder category data — real taxonomy still to be loaded).');
+  // ---- One open ticket belonging to the INACTIVE identity (ADR-010) — otherwise the
+  // Admin Console's "tickets requiring reassignment" queue has nothing to show. ----
+  const inactiveIdentity = await prisma.identity.findUniqueOrThrow({ where: { externalId: 'EMP1008' } });
+  const loginSubcategory = await prisma.subcategory.findFirstOrThrow({
+    where: { name: 'Login / Access Issue', category: { name: 'SBOSS Assist App' } },
+    include: { category: true },
+  });
+  // Ticket is RLS-protected (packages/db's row-level-security migration) — a plain
+  // insert with no session context set is correctly rejected, so this runs the same
+  // admin-bypass session vars the API's withSystemRls helper sets per-request.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.current_team_id', '', true)`;
+    await tx.$executeRaw`SELECT set_config('app.is_admin', 'true', true)`;
+    await tx.ticket.create({
+    data: {
+      identityId: inactiveIdentity.id,
+      departmentId: loginSubcategory.category.departmentId,
+      categoryId: loginSubcategory.categoryId,
+      subcategoryId: loginSubcategory.id,
+      teamId: loginSubcategory.resolverTeamId,
+      channel: 'WHATSAPP',
+      tatDueAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      lastInboundAt: now,
+      messages: {
+        create: {
+          senderType: 'USER',
+          body: 'Still unable to log in to the Assist app.',
+          channelType: 'FREETEXT',
+        },
+      },
+    },
+    });
+  });
+
+  console.log('Seed complete — real (symptom-clubbed) category taxonomy loaded from categoryTaxonomy.ts.');
 }
 
 main()

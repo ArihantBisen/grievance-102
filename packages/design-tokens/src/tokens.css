@@ -1,0 +1,124 @@
+/* SBOSS Grievance & Request System — design tokens (build spec Part C)
+   Applies to every real product surface: Resolver Console, Admin Console, Website.
+   Does NOT apply to anything simulating a WhatsApp thread — that stays in WhatsApp's
+   own native visual language (its header teal, its bubble green) by design. */
+
+:root {
+  /* Ink & neutrals */
+  --ink: #1a1d24;
+  --sub: #5a6270;
+  --paper: #ffffff;
+  --bg: #f4f5f7;
+  --line: #e2e5ea;
+  --line-soft: #eceef2;
+
+  /* Primary — SBOSS brand accent */
+  --accent: #0b5e4a;
+  --accent-soft: #e6f2ee;
+  --accent-line: #bfe0d5;
+
+  /* Semantic: informational */
+  --blue: #1f5c8f;
+  --blue-soft: #e8f0f8;
+  --blue-line: #c5daed;
+
+  /* Semantic: pending / warning / TAT approaching */
+  --amber: #9a6a12;
+  --amber-soft: #fbf1dc;
+  --amber-line: #ecd9a8;
+
+  /* Semantic: breach / danger / escalation */
+  --red: #9a2d2d;
+  --red-soft: #fbeaea;
+  --red-line: #eecaca;
+
+  /* Semantic: confidential / restricted (HR track) */
+  --purple: #5b3b8c;
+  --purple-soft: #efe9f8;
+  --purple-line: #dccdf0;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Status badges — pill shape, -soft background + solid text color, uppercase, bold.
+   Usage rule: never the solid color as a fill, only as text/border on a -soft background. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+.badge-accent { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.badge-blue   { background: var(--blue-soft);   color: var(--blue);   border-color: var(--blue-line); }
+.badge-amber  { background: var(--amber-soft);  color: var(--amber);  border-color: var(--amber-line); }
+.badge-red    { background: var(--red-soft);    color: var(--red);    border-color: var(--red-line); }
+.badge-purple { background: var(--purple-soft); color: var(--purple); border-color: var(--purple-line); }
+
+/* SLA/TAT indicator — small colored dot + text */
+.sla-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.sla-dot-green { background: var(--accent); }
+.sla-dot-amber { background: var(--amber); }
+.sla-dot-red   { background: var(--red); }
+
+/* Cards */
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+/* Tables */
+table.data-table { width: 100%; border-collapse: collapse; }
+table.data-table thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--sub);
+  background: var(--bg);
+  text-align: left;
+  padding: 8px 12px;
+}
+table.data-table tbody td {
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+
+/* Callouts */
+.callout {
+  border-left: 3px solid var(--line);
+  background: var(--bg);
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+.callout-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  display: block;
+}
