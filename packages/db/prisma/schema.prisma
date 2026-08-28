@@ -1,0 +1,322 @@
+// SBOSS Grievance & Request System — Prisma schema
+// Source of truth: SBOSS-Grievance-Build-Spec.md, Part D1 (copied verbatim, not retyped)
+// Do not hand-edit model definitions here without updating the spec to match.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// IDENTITY
+// ============================================================
+model Identity {
+  id                   String            @id @default(cuid())
+  externalId           String            @unique  // Workline's `employeeID` — the stable upsert key
+  personalMobileNo     String?           @unique  // primary lookup field — populated in every real record seen so far
+  officeMobileNo       String?           @unique  // fallback — empty in every real record seen so far, but kept for other segments
+  name                 String
+  role                 Role              @default(OTHER)  // classified from designation at sync time — see D2a
+  designation          String?
+  department           String?           // from Workline's `unit` / `function` — NOT `legalEntity`
+  circle               String?           // Workline's `circle` field directly — shown on the web form, used for routing/context, promoted to a real column per the grievance-portal wireframe
+  branch               String?           // Workline's `branchCode` / `location` — kept for location-specific grievances; region is left derivable from circle rather than stored separately. "Module" (from the original wireframe) is out of scope — dropped, not modeled.
+  vendor               String?           // Workline's `vendorName` — populated for HR-partner staff, may also be "TA SBOSS" for SBOSS-direct contractors
+  workforceCategory    String?           // Workline's `workforceCategory` — informational, not used for classification
+  employmentType       String?           // Workline's OWN `employmentStatus` field (Permanent/Contractual/Consultant/Contract, etc.) — a real, distinct field from empStatus. Do not confuse the two.
+  employmentStatus     EmploymentStatus  @default(ACTIVE)  // mapped ONLY from Workline's `empStatus` (Active/Inactive) — never from their `employmentStatus` field
+
+  // Reporting hierarchy — self-referential, keyed by externalId
+  reportingManagerId   String?
+  reportingManager     Identity?         @relation("ReportsTo", fields: [reportingManagerId], references: [externalId])
+  directReports        Identity[]        @relation("ReportsTo")
+  skipLevelManagerId   String?
+  skipLevelManager     Identity?         @relation("SkipLevel", fields: [skipLevelManagerId], references: [externalId])
+  skipLevelReports     Identity[]        @relation("SkipLevel")
+
+  // Sync metadata
+  recordType           Int?              // Workline's change-reason code, informational only — only present on incremental records, see D2a
+  lastModifiedBy       String?           // from Workline's incremental payload — audit context only
+  sourceSystem         SourceSystem      @default(WORKLINE)
+  sourceUpdatedAt      DateTime?         // Workline's `lastModifiedDate` — only present on incremental records
+  lastSyncedAt         DateTime          // when WE last wrote this record
+  rawWorklineRecord    Json?             // full payload from last sync — debugging + future-proofing without needing a re-fetch
+
+  tickets              Ticket[]
+
+  @@index([employmentStatus])
+  @@index([role])              // every menu-generation query filters on this
+  @@index([reportingManagerId])
+  @@index([skipLevelManagerId])
+}
+
+// DELIBERATELY EXCLUDED from this model, despite being present in Workline's API response:
+// panNo, aadharStatus, dob, fatherName. None of these serve any function in ticket routing,
+// identity lookup, or resolver workflows — they're read from the API response and discarded,
+// never written to this table. This is a data-minimization decision (DPDP-relevant for a bank
+// subsidiary), not an oversight — do not add these fields back without a stated reason tied
+// to an actual product requirement. The rawWorklineRecord JSONB column intentionally does NOT
+// store these either — the sync job strips them before persisting.
+
+enum SourceSystem {
+  WORKLINE
+  // Add other sources here only if identity ever comes from a second upstream system.
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  INACTIVE     // exited/deactivated upstream, OR suspended — both excluded from identity lookup; open tickets flagged for supervisor reassignment per ADR-010. Confirmed Aug 25: a suspended employee raises concerns about their suspension directly with their superior, not through this system, so suspension is treated identically to exit rather than as a separate state.
+}
+
+enum Role {
+  SBOSS_STAFF     // internal SBOSS employees — HQ, admin, consultants
+  SBI_DEPUTED     // SBI-deputed staff (AGM/DGM designations)
+  CM              // Circle Manager
+  TM              // Territory Manager
+  TEAM_LEAD       // FOS Team Lead
+  FOS             // field officer
+  SEVA_SARATHI    // off-roll Seva Sarathi staff
+  OTHER           // catch-all — logged for HR/ops review, still permitted to raise grievances but with default (broadest) menu
+}
+
+// ============================================================
+// CATEGORY TREE
+// ============================================================
+model Department {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  categories  Category[]
+  teams       Team[]
+}
+
+model Category {
+  id                  String             @id @default(cuid())
+  departmentId        String
+  department          Department         @relation(fields: [departmentId], references: [id])
+  name                String
+  ticketType          TicketType         @default(GRIEVANCE)   // separates the grievance tree from the Request tree — per ADR-007
+  defaultTatHours     Int
+  escalationContactId String?
+  escalationContact   EscalationContact? @relation(fields: [escalationContactId], references: [id])
+  requiresWebForm     Boolean            @default(false)
+  isConfidential      Boolean            @default(false)      // ADR-009 — HR-confidential categories route to committee, bypass reporting chain
+  subcategories       Subcategory[]
+  tickets             Ticket[]
+
+  @@index([ticketType])
+  @@index([isConfidential])
+}
+
+model Subcategory {
+  id                 String     @id @default(cuid())
+  categoryId         String
+  category           Category   @relation(fields: [categoryId], references: [id])
+  name               String
+  roleVisibility     Role[]     // ADR-008 — which roles see this subcategory in their menu. Empty = visible to all roles.
+  resolverTeamId     String
+  resolverTeam       Team       @relation(fields: [resolverTeamId], references: [id])
+  tatHoursOverride   Int?
+  tickets            Ticket[]
+}
+
+model Team {
+  id            String        @id @default(cuid())
+  name          String
+  departmentId  String
+  department    Department    @relation(fields: [departmentId], references: [id])
+  isConfidential Boolean      @default(false)   // committee team for HR-confidential tickets — RLS enforces membership-only visibility
+  resolvers     Resolver[]
+  subcategories Subcategory[]
+  tickets       Ticket[]
+}
+
+model Resolver {
+  id              String            @id @default(cuid())
+  name            String
+  email           String            @unique
+  teamId          String
+  team            Team              @relation(fields: [teamId], references: [id])
+  presenceStatus  PresenceStatus    @default(OFFLINE)
+  assignedTickets Ticket[]
+}
+
+enum PresenceStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+}
+
+model EscalationContact {
+  id         String     @id @default(cuid())
+  email      String
+  level      Int        @default(1)
+  categories Category[]
+}
+
+// ============================================================
+// TICKETS
+// ============================================================
+model Ticket {
+  id             String       @id @default(cuid())
+  identityId     String
+  identity       Identity     @relation(fields: [identityId], references: [id])
+  departmentId   String
+  department     Department   @relation(fields: [departmentId], references: [id])
+  categoryId     String
+  category       Category     @relation(fields: [categoryId], references: [id])
+  subcategoryId  String?      // optional — Requests may skip subcategory drill-down
+  subcategory    Subcategory? @relation(fields: [subcategoryId], references: [id])
+  ticketType     TicketType   @default(GRIEVANCE)
+  teamId         String
+  team           Team         @relation(fields: [teamId], references: [id])
+  resolverId     String?
+  resolver       Resolver?    @relation(fields: [resolverId], references: [id])
+  status         TicketStatus @default(NEW)
+  referenceNote  String?      // for REQUEST status-checks: external case/sanction/employee ref being asked about
+  priority       String       @default("standard")
+  channel        Channel
+  isConfidential Boolean      @default(false)   // set from Category.isConfidential at creation time
+  breached       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  tatDueAt       DateTime
+  resolvedAt     DateTime?
+  lastInboundAt  DateTime?    // last time the requester sent a message — drives the 24hr WhatsApp window check
+  messages       Message[]
+  attachments    Attachment[]
+  auditLogs      AuditLog[]
+
+  @@index([ticketType])
+  @@index([status, breached])   // queue/breach-dashboard query pattern
+  @@index([identityId, status]) // "my open tickets" query for multi-ticket disambiguation
+}
+
+enum Channel {
+  WHATSAPP
+  WEB
+}
+
+enum TicketType {
+  GRIEVANCE
+  REQUEST
+}
+
+enum TicketStatus {
+  NEW
+  ASSIGNED
+  IN_PROGRESS
+  AWAITING_CUSTOMER
+  NEEDS_RESOLVER_INPUT
+  ESCALATED
+  REASSIGNED
+  RESOLVED
+  CLOSED
+}
+
+// ============================================================
+// CONVERSATION
+// ============================================================
+model Message {
+  id             String          @id @default(cuid())
+  ticketId       String
+  ticket         Ticket          @relation(fields: [ticketId], references: [id])
+  senderType     SenderType
+  body           String
+  channelType    MessageChannel
+  deliveryStatus DeliveryStatus  @default(PENDING)
+  deliveryError  String?
+  sentAt         DateTime        @default(now())
+  attachments    Attachment[]
+}
+
+enum SenderType {
+  USER
+  RESOLVER
+  SYSTEM
+}
+
+enum MessageChannel {
+  FREETEXT
+  TEMPLATE
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id])
+  messageId  String                          // required — standalone attaches create a synthetic SYSTEM message to own the file
+  message    Message  @relation(fields: [messageId], references: [id])
+  fileUrl    String
+  uploadedBy String
+  uploadedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id                 String              @id @default(cuid())
+  ticketId           String
+  ticket             Ticket              @relation(fields: [ticketId], references: [id])
+  actor              String
+  action             String
+  fromValue          String?
+  toValue            String?
+  escalationTrigger  EscalationTrigger?  // populated when action = "escalated" — distinguishes manual vs auto TAT-breach
+  timestamp          DateTime            @default(now())
+}
+
+enum EscalationTrigger {
+  MANUAL          // resolver clicked Escalate
+  AUTO_TAT_BREACH // scheduler detected breach
+}
+
+// ============================================================
+// SYNC + OPS
+// ============================================================
+model SyncRun {
+  id              String     @id @default(cuid())
+  runType         SyncType
+  status          SyncStatus @default(RUNNING)
+  windowFrom      DateTime?  // matches Workline's FromDate parameter — first Full run leaves this null
+  windowTo        DateTime?  // matches Workline's ToDate parameter — becomes the next run's windowFrom
+  recordsFetched  Int        @default(0)
+  recordsUpserted Int        @default(0)
+  startedAt       DateTime   @default(now())
+  completedAt     DateTime?
+  errorMessage    String?
+}
+
+enum SyncType {
+  FULL
+  INCREMENTAL
+}
+
+enum SyncStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model UnknownContact {
+  id             String   @id @default(cuid())
+  phoneNumber    String
+  messageBody    String?  // first message they sent — helpful context for HR/ops review
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  attemptCount   Int      @default(1)
+  reviewed       Boolean  @default(false)
+  reviewedBy     String?
+  reviewedAt     DateTime?
+
+  @@unique([phoneNumber])   // one row per number, incremented on repeat attempts
+  @@index([reviewed])
+}
