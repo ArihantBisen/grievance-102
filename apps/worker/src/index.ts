@@ -1,9 +1,11 @@
+import { getNotificationSender } from "@sboss/whatsapp-client";
 import { dispatchPendingMessages } from "./dispatch";
-import { LoggingNotificationSender } from "./notificationSender";
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 
-const sender = new LoggingNotificationSender();
+// Picks the real Meta Cloud API client once META_ACCESS_TOKEN is set; falls back to a
+// logging stub otherwise (see packages/whatsapp-client).
+const sender = getNotificationSender();
 
 async function tick() {
   try {

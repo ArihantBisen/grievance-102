@@ -18,6 +18,9 @@ packages/
                        Part D1 — do not hand-edit model shapes without updating the spec)
   design-tokens/     — Shared CSS/Tailwind tokens (Part C of the spec)
   shared-types/      — TypeScript types shared across apps
+  whatsapp-client/   — Meta Cloud API client + logging stub, behind one NotificationSender
+                       interface (ADR-003) — shared by apps/api's webhook receiver and
+                       apps/worker's Outbox Worker
 infra/               — Deployment config (pending hosting/data-residency decision)
 ```
 
@@ -82,6 +85,9 @@ GET    /api/admin/unknown-contacts       admin: ADR-011's review log (?reviewed=
 PATCH  /api/admin/unknown-contacts/:id   admin: mark reviewed
 GET    /api/admin/orphaned-tickets       admin: ADR-010's supervisor-reassignment queue
 GET    /api/admin/sync-runs              admin: Workline SyncRun history
+
+GET    /api/webhook/inbound              Meta's webhook subscription handshake (hub.challenge)
+POST   /api/webhook/inbound              Meta calls this for inbound WhatsApp messages
 ```
 
 Every ticket mutation writes an `AuditLog` row in the same transaction (append-only, per
@@ -110,9 +116,42 @@ The Outbox Worker also needs this bypass for its own queries — an easy bug to
 reintroduce if a new query is added there without going through it (see
 `apps/worker/src/dispatch.ts`'s comment).
 
-Still not built, on purpose: `/api/webhook/inbound`, `/api/webform/*`, the phone-based
-`/api/identity/lookup` — these depend on the Workline sync job and the Meta Cloud API
-integration, neither in scope for this pass.
+**The WhatsApp Middleware (D2b) is now built too** — the webhook receiver above, plus
+`packages/whatsapp-client` (`MetaCloudApiSender`, behind the same `NotificationSender`
+interface the Outbox Worker already used its logging stub through — ADR-003's
+reversibility pattern, now proven out: swapping in the real client took no changes to
+either call site). `getNotificationSender()` picks the real Meta client automatically
+once `META_ACCESS_TOKEN`/`META_PHONE_NUMBER_ID` are set, and falls back to the logging
+stub otherwise — nothing breaks in dev without real credentials, which is the actual
+state of this session (Business Verification was just starting when this was built).
+
+`POST /api/webhook/inbound` verifies `X-Hub-Signature-256` against `META_APP_SECRET`
+(skipped if unset, so local curl testing works without a real secret) and is idempotent
+by construction: a new `InboundMessageDedup` row (keyed by Meta's `wamid`) is inserted
+before any processing, inside the same transaction — a unique-constraint conflict means
+"already handled," verified by literally redelivering an identical payload in testing
+and confirming no duplicate `Message` row landed. Conversation routing, kept
+deliberately minimal:
+- Unknown phone number → `UnknownContact` upsert (ADR-011) + a polite decline reply, no
+  ticket touched.
+- A greeting, or the identity has no open tickets → a reply with the website submission
+  link (`WEBSITE_BASE_URL/?identityId=<id>` — ADR-002's "entry point" flow; still the
+  query-param stand-in for a real signed link, same as before).
+- `"status"` → a short summary of open tickets (ADR-002 action item 2).
+- Free text with exactly one open ticket → appended as a `USER` reply on it (stamps
+  `lastInboundAt`, transitions `AWAITING_CUSTOMER` → `NEEDS_RESOLVER_INPUT`) — no
+  immediate outbound send; the resolver picks it up from the console like any other
+  reply.
+- Free text with more than one open ticket → a short disambiguation prompt.
+
+All of this runs under `withSystemRls`, same posture as ticket creation — there's no
+resolver session on this path. Only `type: "text"` inbound messages are handled; media/
+interactive message types are a documented gap, not silently dropped without a trace
+(they're skipped with a code comment, not swallowed).
+
+Still not built, on purpose: `/api/webform/*`, the phone-based `/api/identity/lookup` —
+these depend on JWT-based citizen auth (the signed-link mechanism ADR-002 describes),
+not in scope for this pass. The Identity Service (Workline sync) is also still not built.
 
 ## Frontends and worker built so far
 
@@ -138,17 +177,25 @@ integration, neither in scope for this pass.
   ticket so it's not empty on a fresh DB; ADR-011's unknown-contact review log and the
   Workline SyncRun history, both correctly empty until the Identity Service/WhatsApp
   Middleware exist to populate them).
-- **`apps/worker`** — Outbox Worker skeleton. Polls `Message` rows with
-  `deliveryStatus = PENDING` (that *is* the outbox queue — no separate table needed,
-  the schema already models it this way) and dispatches through a `NotificationSender`
-  interface with one logging stub implementation, swappable for a real Meta Cloud API /
-  email client later without touching the dispatch loop (same reversibility pattern as
-  ADR-003). Re-applies the 24hr-window TEMPLATE check at dispatch time. Retries by
+- **`apps/worker`** — Outbox Worker. Polls `Message` rows with `deliveryStatus =
+  PENDING` (that *is* the outbox queue — no separate table needed, the schema already
+  models it this way) and dispatches through `packages/whatsapp-client`'s
+  `NotificationSender` — the real Meta client if credentials are set, the logging stub
+  otherwise. Re-applies the 24hr-window TEMPLATE check at dispatch time. Retries by
   simply leaving a failed message PENDING for the next poll cycle; gives up (marks
   `FAILED` + `deliveryError`) after 15 minutes of failures rather than a persisted
-  attempt counter — a deliberate skeleton-scope simplification.
+  attempt counter — a deliberate skeleton-scope simplification. Its own DB queries need
+  the same RLS admin-bypass every other system route uses (`withSystemRls` /
+  `set_config('app.is_admin', 'true', true)`) — this was missed once already (see the
+  RLS section above), a bug worth remembering when touching this file.
 - **`packages/design-tokens`** — Part C's color tokens as CSS variables + badge/table/
-  card/SLA-dot component classes, consumed by both frontends.
+  card/SLA-dot component classes, consumed by all three frontends.
+- **`packages/whatsapp-client`** — `MetaCloudApiSender` (real Meta Cloud API calls),
+  `LoggingNotificationSender` (dev stub), `verifyMetaSignature` (HMAC-SHA256 for
+  inbound webhooks), and `getNotificationSender()` (env-driven factory picking between
+  the two). One outbound message shape carries both a ticket-attached reply/confirmation
+  (worker) and a ticket-less exchange like a status-check reply (webhook handler) —
+  `OutboundNotification.ticketId` is nullable for the latter.
 
 All four were driven end-to-end with Playwright against a live local Postgres + API:
 submit a grievance on the website → it lands in the resolver console's queue → sign in
@@ -197,14 +244,49 @@ through the citizen-facing `GET /api/categories`.
 - [x] Admin Console (`apps/admin-console`) — category tree/TAT/role-visibility editing,
       resolver/team mapping, identity role override, orphaned-ticket queue,
       unknown-contact review, sync-run history
+- [x] WhatsApp Middleware (`packages/whatsapp-client` + `apps/api`'s webhook receiver —
+      spec Part D2b) — real Meta Cloud API client + inbound webhook handler with
+      signature verification and idempotent processing, behind the interface ADR-003
+      specified; runs on the logging stub until real Meta credentials are set, no code
+      changes needed to flip over
 - [ ] Identity Service (Workline Full + Incremental sync)
-- [ ] WhatsApp Middleware (Meta Cloud API direct — see spec Part D2b) — the worker's
-      `NotificationSender` interface is ready to receive this
 - [ ] Real file upload / object storage for attachments (currently URL-only)
+- [ ] TAT-breach scheduler (nothing sets `Ticket.breached` or fires `AUTO_TAT_BREACH`
+      escalations yet — the SLA dots in both consoles are computed client-side, not
+      backed by a real job)
+- [ ] Monitoring endpoints (spec A4: webhook uptime, Outbox Worker queue depth, breached
+      count, failed-dispatch count)
 - [ ] Real resolver roster / real TAT hours / real per-vendor HR-partner routing —
       still placeholders pending sign-off from the relevant department heads
 
-Meta Business Verification: not started as of Aug 28. WhatsApp integration will run in
-Meta test mode (temporary number, confirmed recipients only) for the demo — production
-rollout to the full workforce is gated on verification completing, which is outside this
-timeline's control.
+## Wiring up real Meta credentials
+
+Once you have a permanent System User access token, a registered phone number ID, and
+have started Business Verification:
+
+1. Set `META_ACCESS_TOKEN`, `META_PHONE_NUMBER_ID`, `META_APP_SECRET` (App Settings →
+   Basic → App Secret), and pick your own `META_WEBHOOK_VERIFY_TOKEN` in `.env`.
+2. In Meta's dashboard (Step 2 → Configure Webhooks), set the Callback URL to
+   `<your public API URL>/api/webhook/inbound` and the Verify Token to whatever you put
+   in `META_WEBHOOK_VERIFY_TOKEN` above — Meta can't reach `localhost`, so this needs
+   either a deployed API or a tunnel (e.g. `ngrok http 4000`) pointed at it.
+3. Subscribe the webhook to the `messages` field.
+4. Restart `apps/api` and `apps/worker` — `getNotificationSender()` picks up the real
+   client automatically; no code changes needed.
+
+### Draft message templates (D2b action item 4)
+
+Not submittable from here — paste these into Meta's Message Templates page once the
+WhatsApp product accepts submissions. `sboss_ticket_update` is the one this codebase
+references by default (`META_DEFAULT_TEMPLATE_NAME`) for every TEMPLATE-path send
+(outside the 24hr window) — submit at least that one first.
+
+| Name | Category | Body |
+|---|---|---|
+| `sboss_ticket_update` | Utility | `{{1}}` — a single generic body-variable template used for any update outside the 24hr window (ticket-created confirmation, resolver follow-up, status change alike, per the single-`body`-string shape `Message` carries today) |
+| `sboss_ticket_created` | Utility | Your grievance/request has been received. Reference: {{1}}. We'll update you here as it progresses. |
+| `sboss_resolver_reply` | Utility | You have a new update on ticket {{1}}: {{2}} |
+
+Meta Business Verification: started (as of this pass) — see the dashboard's Step 3.
+Test-mode WhatsApp integration (temporary number, confirmed recipients only) works now;
+production rollout to the full workforce is gated on verification completing.
