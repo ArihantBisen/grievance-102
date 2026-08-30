@@ -1,14 +1,29 @@
 import { useEffect, useState } from "react";
-import { fetchOrphanedTickets, fetchSyncRuns, fetchUnknownContacts, markUnknownContactReviewed } from "../api";
+import {
+  fetchMetrics,
+  fetchOrphanedTickets,
+  fetchSyncRuns,
+  fetchUnknownContacts,
+  markUnknownContactReviewed,
+  type Metrics,
+} from "../api";
 import type { OrphanedTicket, SyncRun, UnknownContact } from "../types";
 
+function formatUptime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 export function OpsTab() {
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [orphaned, setOrphaned] = useState<OrphanedTicket[]>([]);
   const [unknownContacts, setUnknownContacts] = useState<UnknownContact[]>([]);
   const [syncRuns, setSyncRuns] = useState<SyncRun[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   function refresh() {
+    fetchMetrics().then(setMetrics).catch((e) => setError(e.message));
     fetchOrphanedTickets().then(setOrphaned).catch((e) => setError(e.message));
     fetchUnknownContacts(false).then(setUnknownContacts).catch((e) => setError(e.message));
     fetchSyncRuns().then(setSyncRuns).catch((e) => setError(e.message));
@@ -28,6 +43,38 @@ export function OpsTab() {
   return (
     <div>
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="card panel">
+        <h2>System health (spec A4)</h2>
+        {!metrics ? (
+          <div className="empty-state">Loading…</div>
+        ) : (
+          <div className="stat-tile-row">
+            <div className="stat-tile">
+              <div className="stat-tile-value">{formatUptime(metrics.apiUptimeSeconds)}</div>
+              <div className="stat-tile-label">API uptime</div>
+            </div>
+            <div className="stat-tile">
+              <div className="stat-tile-value">
+                {metrics.lastInboundWebhookAt ? new Date(metrics.lastInboundWebhookAt).toLocaleTimeString() : "—"}
+              </div>
+              <div className="stat-tile-label">Last inbound webhook</div>
+            </div>
+            <div className="stat-tile">
+              <div className="stat-tile-value">{metrics.outboxQueueDepth}</div>
+              <div className="stat-tile-label">Outbox queue depth</div>
+            </div>
+            <div className={`stat-tile${metrics.failedDispatchCount > 0 ? " stat-tile-alert" : ""}`}>
+              <div className="stat-tile-value">{metrics.failedDispatchCount}</div>
+              <div className="stat-tile-label">Failed dispatches</div>
+            </div>
+            <div className={`stat-tile${metrics.breachedTicketCount > 0 ? " stat-tile-alert" : ""}`}>
+              <div className="stat-tile-value">{metrics.breachedTicketCount}</div>
+              <div className="stat-tile-label">Breached tickets</div>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="card panel">
         <h2>Tickets requiring reassignment (ADR-010)</h2>
@@ -71,8 +118,8 @@ export function OpsTab() {
       <div className="card panel">
         <h2>Unknown contacts (ADR-011)</h2>
         <p className="hint" style={{ color: "var(--sub)", fontSize: 12, marginBottom: 12 }}>
-          Messages from phone numbers not in the Identity table. Populated once the WhatsApp Middleware
-          (D2b) exists — empty until then.
+          Messages from phone numbers not in the Identity table, logged by the WhatsApp
+          webhook receiver.
         </p>
         {unknownContacts.length === 0 ? (
           <div className="empty-state">No unreviewed unknown contacts.</div>

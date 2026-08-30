@@ -115,3 +115,32 @@ adminRouter.get(
     res.json(runs);
   })
 );
+
+// GET /api/admin/metrics — spec A4's "Phase 1 minimum" monitoring: webhook uptime,
+// Outbox Worker queue depth, breached-ticket count, failed-dispatch count. Ticket/
+// Message are RLS-protected, so those two counts go through withRlsContext's admin
+// bypass; InboundMessageDedup/uptime aren't RLS-protected (system-only tables/values).
+adminRouter.get(
+  "/metrics",
+  asyncHandler(async (req, res) => {
+    const auth = req.auth!;
+
+    const [lastInbound, counts] = await Promise.all([
+      prisma.inboundMessageDedup.findFirst({ orderBy: { receivedAt: "desc" } }),
+      withRlsContext({ teamId: auth.teamId, isAdmin: true }, async (tx) => {
+        const [outboxQueueDepth, failedDispatchCount, breachedTicketCount] = await Promise.all([
+          tx.message.count({ where: { deliveryStatus: "PENDING" } }),
+          tx.message.count({ where: { deliveryStatus: "FAILED" } }),
+          tx.ticket.count({ where: { breached: true, status: { in: OPEN_STATUSES } } }),
+        ]);
+        return { outboxQueueDepth, failedDispatchCount, breachedTicketCount };
+      }),
+    ]);
+
+    res.json({
+      apiUptimeSeconds: Math.round(process.uptime()),
+      lastInboundWebhookAt: lastInbound?.receivedAt ?? null,
+      ...counts,
+    });
+  })
+);

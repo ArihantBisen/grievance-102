@@ -1,5 +1,19 @@
 .app-shell { max-width: 1080px; margin: 0 auto; padding: 20px; }
 
+.stat-tile-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.stat-tile {
+  flex: 1;
+  min-width: 120px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.stat-tile-value { font-size: 20px; font-weight: 700; color: var(--ink); }
+.stat-tile-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--sub); margin-top: 2px; }
+.stat-tile-alert { background: var(--red-soft); border-color: var(--red-line); }
+.stat-tile-alert .stat-tile-value { color: var(--red); }
+
 .top-bar {
   display: flex;
   align-items: center;

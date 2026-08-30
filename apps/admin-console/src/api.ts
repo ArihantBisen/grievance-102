@@ -111,3 +111,15 @@ export function fetchOrphanedTickets(): Promise<OrphanedTicket[]> {
 export function fetchSyncRuns(): Promise<SyncRun[]> {
   return fetch("/api/admin/sync-runs", { headers: authHeaders() }).then((r) => json<SyncRun[]>(r));
 }
+
+export interface Metrics {
+  apiUptimeSeconds: number;
+  lastInboundWebhookAt: string | null;
+  outboxQueueDepth: number;
+  failedDispatchCount: number;
+  breachedTicketCount: number;
+}
+
+export function fetchMetrics(): Promise<Metrics> {
+  return fetch("/api/admin/metrics", { headers: authHeaders() }).then((r) => json<Metrics>(r));
+}

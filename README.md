@@ -85,9 +85,12 @@ GET    /api/admin/unknown-contacts       admin: ADR-011's review log (?reviewed=
 PATCH  /api/admin/unknown-contacts/:id   admin: mark reviewed
 GET    /api/admin/orphaned-tickets       admin: ADR-010's supervisor-reassignment queue
 GET    /api/admin/sync-runs              admin: Workline SyncRun history
+GET    /api/admin/metrics                admin: spec A4 monitoring (uptime, queue depth, breach/failure counts)
 
 GET    /api/webhook/inbound              Meta's webhook subscription handshake (hub.challenge)
 POST   /api/webhook/inbound              Meta calls this for inbound WhatsApp messages
+
+POST   /api/uploads                      citizen-facing: multipart file upload -> { fileUrl }
 ```
 
 Every ticket mutation writes an `AuditLog` row in the same transaction (append-only, per
@@ -249,13 +252,20 @@ through the citizen-facing `GET /api/categories`.
       signature verification and idempotent processing, behind the interface ADR-003
       specified; runs on the logging stub until real Meta credentials are set, no code
       changes needed to flip over
+- [x] TAT-breach scheduler (`apps/worker/src/breachCheck.ts`) — a second poll loop
+      (default 60s) finds open, non-breached tickets past `tatDueAt`, sets
+      `breached = true`, transitions to `ESCALATED` with an `AuditLog` row carrying
+      `escalationTrigger: AUTO_TAT_BREACH`, and writes a `SYSTEM` message the existing
+      Outbox path notifies the citizen with — no second notification mechanism needed
+- [x] Monitoring endpoint (`GET /api/admin/metrics`, spec A4) — API uptime, last
+      inbound-webhook time, Outbox queue depth, failed-dispatch count, breached-ticket
+      count; surfaced as a stat-tile row at the top of the Admin Console's Ops tab
+- [x] Real file upload (`POST /api/uploads`, `apps/api/src/lib/storage.ts`) — a
+      `StorageBackend` interface (same reversibility pattern as `NotificationSender`)
+      with one `LocalDiskStorage` implementation; the website's Attachments step now
+      has a real file picker (PNG/JPEG/WEBP/PDF, 10MB cap) alongside the URL-paste
+      fallback
 - [ ] Identity Service (Workline Full + Incremental sync)
-- [ ] Real file upload / object storage for attachments (currently URL-only)
-- [ ] TAT-breach scheduler (nothing sets `Ticket.breached` or fires `AUTO_TAT_BREACH`
-      escalations yet — the SLA dots in both consoles are computed client-side, not
-      backed by a real job)
-- [ ] Monitoring endpoints (spec A4: webhook uptime, Outbox Worker queue depth, breached
-      count, failed-dispatch count)
 - [ ] Real resolver roster / real TAT hours / real per-vendor HR-partner routing —
       still placeholders pending sign-off from the relevant department heads
 

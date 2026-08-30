@@ -33,3 +33,9 @@ export function addAttachment(ticketId: string, fileUrl: string, uploadedBy: str
     body: JSON.stringify({ fileUrl, uploadedBy }),
   }).then((r) => json(r));
 }
+
+export function uploadFile(file: File): Promise<{ fileUrl: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  return fetch("/api/uploads", { method: "POST", body: form }).then((r) => json<{ fileUrl: string }>(r));
+}
