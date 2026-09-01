@@ -1,3 +1,4 @@
+import "./loadEnv";
 import { getNotificationSender } from "@sboss/whatsapp-client";
 import { dispatchPendingMessages } from "./dispatch";
 import { checkTatBreaches } from "./breachCheck";

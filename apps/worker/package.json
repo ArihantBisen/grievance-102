@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@sboss/db": "*",
-    "@sboss/whatsapp-client": "*"
+    "@sboss/whatsapp-client": "*",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
