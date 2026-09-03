@@ -144,3 +144,153 @@ adminRouter.get(
     });
   })
 );
+
+// POST /api/admin/tickets/bulk-close — close every currently-open ticket matching the
+// given filters in one request, or an explicit list of ticket IDs. Built for the
+// recurring need to clear a test identity's accumulated open tickets in one shot
+// instead of hand-editing the DB; each closed ticket still gets its own AuditLog entry
+// (fromValue = that ticket's own prior status) so the trail reads the same as any
+// individual close would.
+adminRouter.post(
+  "/tickets/bulk-close",
+  asyncHandler(async (req, res) => {
+    const auth = req.auth!;
+    const { ticketIds, identityId, teamId, olderThanHours, targetStatus } = req.body ?? {};
+    const finalStatus: TicketStatus = targetStatus === "RESOLVED" ? "RESOLVED" : "CLOSED";
+
+    const closedIds = await withRlsContext({ teamId: auth.teamId, isAdmin: true }, async (tx) => {
+      const where =
+        Array.isArray(ticketIds) && ticketIds.length > 0
+          ? { id: { in: ticketIds as string[] } }
+          : {
+              status: { in: OPEN_STATUSES },
+              identityId: identityId || undefined,
+              teamId: teamId || undefined,
+              createdAt: olderThanHours
+                ? { lt: new Date(Date.now() - Number(olderThanHours) * 60 * 60 * 1000) }
+                : undefined,
+            };
+
+      const targets = await tx.ticket.findMany({ where, select: { id: true, status: true } });
+      if (targets.length === 0) return [];
+
+      const now = new Date();
+      await tx.ticket.updateMany({
+        where: { id: { in: targets.map((t) => t.id) } },
+        data: { status: finalStatus, resolvedAt: now },
+      });
+      await tx.auditLog.createMany({
+        data: targets.map((t) => ({
+          ticketId: t.id,
+          actor: auth.email,
+          action: "STATUS_CHANGED",
+          fromValue: t.status,
+          toValue: finalStatus,
+        })),
+      });
+      return targets.map((t) => t.id);
+    });
+
+    res.json({ closedCount: closedIds.length, ticketIds: closedIds });
+  })
+);
+
+// GET /api/admin/reports/summary — MIS-style aggregate view: ticket volume, TAT
+// performance, team/category breakdown, resolver workload. Deliberately computed with
+// plain groupBy + in-process sorting/averaging rather than raw SQL, since the volumes
+// here (dev/demo scale) don't need DB-side aggregation to stay fast, and it keeps this
+// route as unexciting as every other admin route to review.
+adminRouter.get(
+  "/reports/summary",
+  asyncHandler(async (req, res) => {
+    const auth = req.auth!;
+
+    const summary = await withRlsContext({ teamId: auth.teamId, isAdmin: true }, async (tx) => {
+      const [
+        totalAll,
+        totalOpen,
+        totalBreached,
+        statusCounts,
+        teams,
+        totalsByTeam,
+        openByTeam,
+        resolvedDurations,
+        resolvers,
+        openByResolver,
+        categories,
+        countsByCategory,
+      ] = await Promise.all([
+        tx.ticket.count(),
+        tx.ticket.count({ where: { status: { in: OPEN_STATUSES } } }),
+        tx.ticket.count({ where: { breached: true } }),
+        tx.ticket.groupBy({ by: ["status"], _count: { _all: true } }),
+        tx.team.findMany({ select: { id: true, name: true } }),
+        tx.ticket.groupBy({ by: ["teamId"], _count: { _all: true } }),
+        tx.ticket.groupBy({ by: ["teamId"], where: { status: { in: OPEN_STATUSES } }, _count: { _all: true } }),
+        tx.ticket.findMany({
+          where: { resolvedAt: { not: null } },
+          select: { createdAt: true, resolvedAt: true },
+          take: 2000,
+        }),
+        tx.resolver.findMany({ select: { id: true, name: true } }),
+        tx.ticket.groupBy({
+          by: ["resolverId"],
+          where: { resolverId: { not: null }, status: { in: OPEN_STATUSES } },
+          _count: { _all: true },
+        }),
+        tx.category.findMany({ select: { id: true, name: true } }),
+        tx.ticket.groupBy({ by: ["categoryId"], _count: { _all: true } }),
+      ]);
+
+      const teamNameById = new Map(teams.map((t) => [t.id, t.name]));
+      const openByTeamId = new Map(openByTeam.map((r) => [r.teamId, r._count._all]));
+      const byTeam = totalsByTeam
+        .map((r) => ({
+          teamId: r.teamId,
+          teamName: teamNameById.get(r.teamId) ?? "(unknown team)",
+          totalCount: r._count._all,
+          openCount: openByTeamId.get(r.teamId) ?? 0,
+        }))
+        .sort((a, b) => b.totalCount - a.totalCount);
+
+      const resolverNameById = new Map(resolvers.map((r) => [r.id, r.name]));
+      const resolverWorkload = openByResolver
+        .map((r) => ({
+          resolverId: r.resolverId as string,
+          resolverName: resolverNameById.get(r.resolverId as string) ?? "(unknown resolver)",
+          openCount: r._count._all,
+        }))
+        .sort((a, b) => b.openCount - a.openCount);
+
+      const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+      const byCategory = countsByCategory
+        .map((r) => ({
+          categoryId: r.categoryId,
+          categoryName: categoryNameById.get(r.categoryId) ?? "(unknown category)",
+          count: r._count._all,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8);
+
+      const resolutionHours = resolvedDurations.map(
+        (t) => (t.resolvedAt!.getTime() - t.createdAt.getTime()) / 3_600_000
+      );
+      const avgResolutionHours =
+        resolutionHours.length > 0
+          ? resolutionHours.reduce((sum, h) => sum + h, 0) / resolutionHours.length
+          : null;
+
+      return {
+        totals: { all: totalAll, open: totalOpen, breached: totalBreached },
+        breachRate: totalAll > 0 ? totalBreached / totalAll : 0,
+        avgResolutionHours,
+        byStatus: statusCounts.map((r) => ({ status: r.status, count: r._count._all })),
+        byTeam,
+        byCategory,
+        resolverWorkload,
+      };
+    });
+
+    res.json(summary);
+  })
+);

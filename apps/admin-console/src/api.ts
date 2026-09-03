@@ -1,8 +1,10 @@
 import { loadSession, type AdminResolver } from "./auth";
 import type {
+  BulkCloseResult,
   Department,
   Identity,
   OrphanedTicket,
+  ReportsSummary,
   Resolver,
   SyncRun,
   Team,
@@ -122,4 +124,24 @@ export interface Metrics {
 
 export function fetchMetrics(): Promise<Metrics> {
   return fetch("/api/admin/metrics", { headers: authHeaders() }).then((r) => json<Metrics>(r));
+}
+
+export function fetchReportsSummary(): Promise<ReportsSummary> {
+  return fetch("/api/admin/reports/summary", { headers: authHeaders() }).then((r) => json<ReportsSummary>(r));
+}
+
+export interface BulkCloseFilters {
+  ticketIds?: string[];
+  identityId?: string;
+  teamId?: string;
+  olderThanHours?: number;
+  targetStatus?: "RESOLVED" | "CLOSED";
+}
+
+export function bulkCloseTickets(filters: BulkCloseFilters): Promise<BulkCloseResult> {
+  return fetch("/api/admin/tickets/bulk-close", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(filters),
+  }).then((r) => json<BulkCloseResult>(r));
 }
