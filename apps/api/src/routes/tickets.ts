@@ -23,6 +23,48 @@ const OPEN_STATUSES: TicketStatus[] = [
   "REASSIGNED",
 ];
 
+// Formats the confirmation a citizen receives the moment a ticket is raised. Kept as
+// plain labelled lines with WhatsApp's *bold* markup — the same content the escalation
+// email lays out as an HTML card, in the only formatting WhatsApp actually renders.
+function formatStamp(date: Date): string {
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function buildTicketCard(input: {
+  reference: string;
+  identityName: string;
+  ticketType: TicketType;
+  categoryName: string;
+  subcategoryName: string;
+  createdAt: Date;
+  tatDueAt: Date;
+}): string {
+  const heading = input.ticketType === "REQUEST" ? "Request Registered" : "Grievance Registered";
+  return [
+    `*${heading}*`,
+    "",
+    `Dear ${input.identityName.split(" ")[0]}, your ${
+      input.ticketType === "REQUEST" ? "request" : "grievance"
+    } has been logged in the SBOSS Grievance Portal.`,
+    "",
+    `*Reference:* ${input.reference}`,
+    `*Logged on:* ${formatStamp(input.createdAt)}`,
+    `*Category:* ${input.categoryName}`,
+    `*Sub-category:* ${input.subcategoryName}`,
+    `*Status:* New`,
+    `*Response due by:* ${formatStamp(input.tatDueAt)}`,
+    "",
+    `We'll update you here as it progresses. Reply *status* any time to check where things stand.`,
+  ].join("\n");
+}
+
 const TICKET_DETAIL_INCLUDE = {
   identity: true,
   category: true,
@@ -125,11 +167,26 @@ ticketsRouter.post(
       // SYSTEM message left PENDING for the Outbox Worker to actually dispatch —
       // Message.deliveryStatus is the outbox queue (no separate OutboxEvent table
       // exists in the schema; this is the queue signal the worker polls on).
+      //
+      // Formatted as a ticket card using WhatsApp's own markup (*bold*) rather than
+      // the rich HTML the email template uses — WhatsApp renders no HTML, colours, or
+      // layout, so the card has to be carried by labelled lines and bold weight alone.
+      // The reference shown is the same trailing-8 short code the webhook's "status"
+      // and multi-ticket flows accept back, so what the citizen is shown is exactly
+      // what they can reply with.
       await tx.message.create({
         data: {
           ticketId: created.id,
           senderType: "SYSTEM",
-          body: `Ticket ${created.id} created. We'll notify you here as it progresses.`,
+          body: buildTicketCard({
+            reference: created.id.slice(-8),
+            identityName: identity.name,
+            ticketType: requestedType,
+            categoryName: subcategory.category.name,
+            subcategoryName: subcategory.name,
+            createdAt: now,
+            tatDueAt,
+          }),
           channelType: channel === "WEB" ? "TEMPLATE" : "FREETEXT",
         },
       });
