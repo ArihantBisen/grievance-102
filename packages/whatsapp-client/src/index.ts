@@ -4,7 +4,7 @@ import type { NotificationSender } from "./types";
 
 export * from "./types";
 export { LoggingNotificationSender } from "./loggingSender";
-export { MetaCloudApiSender, type MetaClientConfig } from "./metaClient";
+export { MetaCloudApiSender, type MetaClientConfig, fetchMetaMedia } from "./metaClient";
 export { verifyMetaSignature } from "./signature";
 
 // Real credentials (META_ACCESS_TOKEN) aren't set in most dev environments yet — this

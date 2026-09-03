@@ -69,3 +69,30 @@ export class MetaCloudApiSender implements NotificationSender {
     }
   }
 }
+
+// Inbound media (image/document) messages carry only a media ID — the actual bytes
+// live on Meta's servers and need two hops to retrieve: look up the temporary download
+// URL for the ID, then fetch that URL. Both requests need the same bearer token as
+// sending does. Used by apps/api's webhook handler when a citizen attaches a file.
+export async function fetchMetaMedia(
+  mediaId: string,
+  config: { accessToken: string; apiVersion?: string }
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const version = config.apiVersion ?? "v20.0";
+
+  const lookupRes = await fetch(`https://graph.facebook.com/${version}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${config.accessToken}` },
+  });
+  if (!lookupRes.ok) {
+    const errorBody = await lookupRes.text().catch(() => "");
+    throw new Error(`Meta media lookup failed (${lookupRes.status}): ${errorBody.slice(0, 500)}`);
+  }
+  const { url, mime_type: mimeType } = (await lookupRes.json()) as { url: string; mime_type: string };
+
+  const fileRes = await fetch(url, { headers: { Authorization: `Bearer ${config.accessToken}` } });
+  if (!fileRes.ok) {
+    throw new Error(`Meta media download failed (${fileRes.status})`);
+  }
+
+  return { buffer: Buffer.from(await fileRes.arrayBuffer()), mimeType };
+}
