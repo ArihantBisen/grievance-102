@@ -328,3 +328,12 @@ model UnknownContact {
   @@unique([phoneNumber])   // one row per number, incremented on repeat attempts
   @@index([reviewed])
 }
+
+// D2b / NFR "Idempotent webhook processing (Route Mobile/Meta may redeliver)". The
+// webhook handler inserts a row here (id = Meta's wamid) before doing anything else;
+// a unique-constraint conflict means this delivery was already processed. System-only
+// — never resolver-facing, not RLS-protected.
+model InboundMessageDedup {
+  id         String   @id // Meta's wamid
+  receivedAt DateTime @default(now())
+}

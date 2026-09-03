@@ -2,3 +2,4 @@ node_modules/
 dist/
 .env
 packages/db/.env
+apps/api/uploads/

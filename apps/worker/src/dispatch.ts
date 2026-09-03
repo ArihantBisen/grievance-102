@@ -1,5 +1,5 @@
 import { getPrismaClient } from "@sboss/db";
-import type { NotificationSender } from "./notificationSender";
+import type { NotificationSender } from "@sboss/whatsapp-client";
 
 const prisma = getPrismaClient();
 
