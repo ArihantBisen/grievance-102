@@ -46,6 +46,38 @@ dev/demo only, see `packages/db/src/seed.ts`. The admin account is `admin@sboss.
 a non-admin (e.g. `asha.rao@sboss.example`) can sign into the Resolver Console but is
 rejected by the Admin Console's login screen.
 
+### Required: run the app as a non-superuser database role
+
+Team scoping is enforced by Postgres row-level security, and **Postgres exempts
+superusers and `BYPASSRLS` roles from RLS unconditionally** — `FORCE ROW LEVEL SECURITY`
+does not override that. The official `postgres` Docker image makes `POSTGRES_USER` a
+superuser, so connecting the app as that user silently disables every team-scoping
+policy: any resolver can then read and modify any other team's tickets, including
+HR-confidential ones.
+
+Create the least-privilege application role once, then point the app at it:
+
+```bash
+psql "postgresql://sboss:sboss@localhost:5432/sboss_grievance" -f packages/db/sql/create-app-role.sql
+```
+
+```bash
+# apps/api and apps/worker — the running application
+DATABASE_URL="postgresql://sboss_app:sboss_app_pw@127.0.0.1:5432/sboss_grievance?schema=public"
+```
+
+Migrations still need the owning/superuser role: run `npm run db:migrate` as `sboss`,
+and run the application as `sboss_app`. To confirm the isolation is actually on:
+
+```sql
+SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'sboss_app';
+-- both flags must be false
+```
+
+Use `127.0.0.1` rather than `localhost` in `DATABASE_URL` on Windows: WSL's relay can
+own the IPv6 loopback and intercept `localhost:5432` before Docker's published port
+sees it.
+
 ## API surface built so far
 
 ```

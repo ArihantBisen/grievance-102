@@ -193,6 +193,12 @@ model Ticket {
   tatDueAt       DateTime
   resolvedAt     DateTime?
   lastInboundAt  DateTime?    // last time the requester sent a message — drives the 24hr WhatsApp window check
+  closureReason  String?      // why/how it was resolved — required at close time, and sent to the
+                              // requester as the closing message rather than only being filed here
+  reopenCount    Int          @default(0)  // a resolved ticket may be reopened at most twice, and only
+                                           // within REOPEN_WINDOW_DAYS of resolvedAt — see apps/api's
+                                           // tickets route. Counts reopens, not closes.
+  lastReopenedAt DateTime?
   messages       Message[]
   attachments    Attachment[]
   auditLogs      AuditLog[]
@@ -222,6 +228,8 @@ enum TicketStatus {
   REASSIGNED
   RESOLVED
   CLOSED
+  REOPENED   // a resolved/closed ticket the requester or a resolver pulled back open; counts as
+             // open for queue, TAT and disambiguation purposes
 }
 
 // ============================================================

@@ -27,6 +27,7 @@ export type TicketStatus =
   | "NEEDS_RESOLVER_INPUT"
   | "ESCALATED"
   | "REASSIGNED"
+  | "REOPENED"
   | "RESOLVED"
   | "CLOSED";
 

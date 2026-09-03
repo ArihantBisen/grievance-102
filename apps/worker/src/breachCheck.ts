@@ -12,6 +12,7 @@ const BREACHABLE_STATUSES: TicketStatus[] = [
   "AWAITING_CUSTOMER",
   "NEEDS_RESOLVER_INPUT",
   "REASSIGNED",
+  "REOPENED",
 ];
 
 export async function checkTatBreaches(): Promise<{ breached: number }> {

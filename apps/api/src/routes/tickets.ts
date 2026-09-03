@@ -21,6 +21,7 @@ const OPEN_STATUSES: TicketStatus[] = [
   "NEEDS_RESOLVER_INPUT",
   "ESCALATED",
   "REASSIGNED",
+  "REOPENED",
 ];
 
 // Formats the confirmation a citizen receives the moment a ticket is raised. Kept as
@@ -132,6 +133,28 @@ ticketsRouter.post(
         throw new HttpError(
           400,
           `Category "${subcategory.category.name}" is not part of the ${requestedType} category set`
+        );
+      }
+
+      // Same-day duplicate lock: one ticket per identity per subcategory per calendar
+      // day. Stops the same complaint being filed repeatedly from the menu (the common
+      // case being a citizen re-walking the form because they didn't see the first
+      // confirmation), which otherwise fragments one issue across several tickets and
+      // makes the multi-ticket disambiguation prompt fire needlessly. Scoped to the
+      // subcategory, not the category, so genuinely different issues under one category
+      // are still allowed on the same day.
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const sameDayDuplicate = await tx.ticket.findFirst({
+        where: { identityId, subcategoryId, createdAt: { gte: startOfDay } },
+        select: { id: true },
+      });
+      if (sameDayDuplicate) {
+        throw new HttpError(
+          409,
+          `You've already raised a ticket under "${subcategory.name}" today (reference ${sameDayDuplicate.id.slice(
+            -8
+          )}). Reply on that ticket instead of raising a new one, or pick a different sub-category.`
         );
       }
 
@@ -256,6 +279,44 @@ ticketsRouter.get(
     );
 
     res.json(tickets);
+  })
+);
+
+// GET /api/tickets/summary — status counts for the resolver's own queue dashboard.
+// Team-scoped by RLS exactly like GET /tickets, so the numbers on a resolver's tiles
+// always match the rows they can actually open. Buckets, not raw statuses: the console
+// shows New / In Progress / Closed / Reopened, and everything mid-flight (assigned,
+// awaiting customer, escalated, reassigned…) reads as "in progress" to a resolver.
+//
+// MUST stay above GET /tickets/:id — Express matches in registration order, and
+// "/tickets/:id" happily swallows "/tickets/summary" with id = "summary" otherwise.
+const IN_PROGRESS_STATUSES: TicketStatus[] = [
+  "ASSIGNED",
+  "IN_PROGRESS",
+  "AWAITING_CUSTOMER",
+  "NEEDS_RESOLVER_INPUT",
+  "ESCALATED",
+  "REASSIGNED",
+];
+
+ticketsRouter.get(
+  "/tickets/summary",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const auth = req.auth!;
+
+    const summary = await withRlsContext({ teamId: auth.teamId, isAdmin: auth.isAdmin }, async (tx) => {
+      const [neu, inProgress, closed, reopened, breached] = await Promise.all([
+        tx.ticket.count({ where: { status: "NEW" } }),
+        tx.ticket.count({ where: { status: { in: IN_PROGRESS_STATUSES } } }),
+        tx.ticket.count({ where: { status: { in: ["RESOLVED", "CLOSED"] } } }),
+        tx.ticket.count({ where: { status: "REOPENED" } }),
+        tx.ticket.count({ where: { breached: true, status: { in: OPEN_STATUSES } } }),
+      ]);
+      return { new: neu, inProgress, closed, reopened, breached };
+    });
+
+    res.json(summary);
   })
 );
 
@@ -390,6 +451,160 @@ ticketsRouter.post(
     });
 
     res.status(201).json(message);
+  })
+);
+
+// POST /api/tickets/bulk-close — close several tickets at once with one shared reason.
+// Resolver-facing (team-scoped by RLS, unlike the admin router's filter-driven variant),
+// and the reason is mandatory: closing without saying how it was resolved is exactly the
+// gap that makes a closed ticket useless to the next person reading it. The reason is
+// also written into each ticket's thread as a RESOLVER message, so it goes out to the
+// requester over WhatsApp through the normal Outbox path rather than only being filed.
+ticketsRouter.post(
+  "/tickets/bulk-close",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { ticketIds, reason } = req.body ?? {};
+    const auth = req.auth!;
+
+    if (!Array.isArray(ticketIds) || ticketIds.length === 0) {
+      throw new HttpError(400, "ticketIds must be a non-empty array");
+    }
+    if (typeof reason !== "string" || reason.trim().length === 0) {
+      throw new HttpError(400, "reason is required — say how these tickets were resolved");
+    }
+    const closureReason = reason.trim();
+
+    const closed = await withRlsContext({ teamId: auth.teamId, isAdmin: auth.isAdmin }, async (tx) => {
+      // RLS silently filters out anything outside the caller's team, so this findMany is
+      // also the authorisation check — ids the resolver may not touch simply don't come
+      // back, and are reported as skipped rather than closed.
+      const targets = await tx.ticket.findMany({
+        where: { id: { in: ticketIds as string[] }, status: { in: OPEN_STATUSES } },
+        select: { id: true, status: true, lastInboundAt: true },
+      });
+      if (targets.length === 0) return [];
+
+      const now = new Date();
+      await tx.ticket.updateMany({
+        where: { id: { in: targets.map((t) => t.id) } },
+        data: { status: "CLOSED", resolvedAt: now, closureReason },
+      });
+
+      // Same 24hr-window rule the single reply path applies (D2/D2b): outside it, the
+      // send has to go as an approved TEMPLATE or Meta rejects it.
+      await tx.message.createMany({
+        data: targets.map((t) => ({
+          ticketId: t.id,
+          senderType: "RESOLVER" as const,
+          body: `Your ticket has been resolved and closed.\n\n*Resolution:* ${closureReason}`,
+          channelType:
+            !t.lastInboundAt || Date.now() - t.lastInboundAt.getTime() > WHATSAPP_WINDOW_MS
+              ? ("TEMPLATE" as const)
+              : ("FREETEXT" as const),
+        })),
+      });
+
+      await tx.auditLog.createMany({
+        data: targets.map((t) => ({
+          ticketId: t.id,
+          actor: auth.email,
+          action: "STATUS_CHANGED",
+          fromValue: t.status,
+          toValue: `CLOSED: ${closureReason}`,
+        })),
+      });
+
+      return targets.map((t) => t.id);
+    });
+
+    res.json({
+      closedCount: closed.length,
+      skippedCount: ticketIds.length - closed.length,
+      ticketIds: closed,
+    });
+  })
+);
+
+// POST /api/tickets/:id/reopen — pull a resolved/closed ticket back open.
+// Bounded deliberately: only within REOPEN_WINDOW_DAYS of the resolution, and only
+// REOPEN_LIMIT times, so a closed ticket can't be reopened indefinitely to dodge the
+// TAT clock. Past either bound the requester has to raise a fresh ticket, which is the
+// honest outcome — a months-old thread reopened for a new problem is a new problem.
+const REOPEN_WINDOW_DAYS = 3;
+const REOPEN_LIMIT = 2;
+
+ticketsRouter.post(
+  "/tickets/:id/reopen",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { reason } = req.body ?? {};
+    const auth = req.auth!;
+
+    const updated = await withRlsContext({ teamId: auth.teamId, isAdmin: auth.isAdmin }, async (tx) => {
+      const ticket = await tx.ticket.findUnique({ where: { id: req.params.id } });
+      if (!ticket) throw new HttpError(404, "Ticket not found");
+
+      if (ticket.status !== "RESOLVED" && ticket.status !== "CLOSED") {
+        throw new HttpError(400, "Only a resolved or closed ticket can be reopened");
+      }
+      if (!ticket.resolvedAt) {
+        throw new HttpError(400, "This ticket has no resolution date to reopen against");
+      }
+
+      const windowMs = REOPEN_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+      const ageMs = Date.now() - ticket.resolvedAt.getTime();
+      if (ageMs > windowMs) {
+        throw new HttpError(
+          400,
+          `This ticket was resolved more than ${REOPEN_WINDOW_DAYS} days ago and can no longer be reopened — please raise a new ticket.`
+        );
+      }
+      if (ticket.reopenCount >= REOPEN_LIMIT) {
+        throw new HttpError(
+          400,
+          `This ticket has already been reopened ${REOPEN_LIMIT} times — please raise a new ticket.`
+        );
+      }
+
+      const now = new Date();
+      const result = await tx.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          status: "REOPENED",
+          reopenCount: { increment: 1 },
+          lastReopenedAt: now,
+        },
+      });
+
+      await tx.message.create({
+        data: {
+          ticketId: ticket.id,
+          senderType: "SYSTEM",
+          body: reason
+            ? `This ticket has been reopened.\n\n*Reason:* ${String(reason).trim()}`
+            : "This ticket has been reopened and is being looked at again.",
+          channelType:
+            !ticket.lastInboundAt || Date.now() - ticket.lastInboundAt.getTime() > WHATSAPP_WINDOW_MS
+              ? "TEMPLATE"
+              : "FREETEXT",
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          ticketId: ticket.id,
+          actor: auth.email,
+          action: "STATUS_CHANGED",
+          fromValue: ticket.status,
+          toValue: reason ? `REOPENED: ${String(reason).trim()}` : "REOPENED",
+        },
+      });
+
+      return result;
+    });
+
+    res.json(updated);
   })
 );
 

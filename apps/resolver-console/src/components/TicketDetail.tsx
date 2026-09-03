@@ -11,8 +11,15 @@ interface Props {
   onReply: (body: string) => void;
   onEscalate: (reason: string) => void;
   onResolve: () => void;
+  onReopen: (reason: string) => void;
   busy: boolean;
 }
+
+// Mirrors the API's own limits (apps/api tickets route) so the button can explain
+// itself before the request is made rather than only failing afterwards. The API
+// remains the authority — this is a courtesy, not the enforcement.
+const REOPEN_WINDOW_DAYS = 3;
+const REOPEN_LIMIT = 2;
 
 export function TicketDetail({
   ticket,
@@ -22,11 +29,30 @@ export function TicketDetail({
   onReply,
   onEscalate,
   onResolve,
+  onReopen,
   busy,
 }: Props) {
   const [replyBody, setReplyBody] = useState("");
   const [escalateReason, setEscalateReason] = useState("");
   const [showEscalate, setShowEscalate] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [showReopen, setShowReopen] = useState(false);
+
+  const isClosed = ticket.status === "RESOLVED" || ticket.status === "CLOSED";
+  const daysSinceResolved = ticket.resolvedAt
+    ? (Date.now() - new Date(ticket.resolvedAt).getTime()) / (24 * 60 * 60 * 1000)
+    : null;
+  const withinReopenWindow = daysSinceResolved !== null && daysSinceResolved <= REOPEN_WINDOW_DAYS;
+  const reopensLeft = REOPEN_LIMIT - ticket.reopenCount;
+  const canReopen = isClosed && withinReopenWindow && reopensLeft > 0;
+
+  const reopenBlockedReason = !isClosed
+    ? null
+    : !withinReopenWindow
+      ? `Resolved more than ${REOPEN_WINDOW_DAYS} days ago — raise a new ticket instead.`
+      : reopensLeft <= 0
+        ? `Already reopened ${REOPEN_LIMIT} times — raise a new ticket instead.`
+        : null;
 
   return (
     <div className="detail-panel card">
@@ -79,14 +105,58 @@ export function TicketDetail({
           Escalate
         </button>
 
-        <button
-          className="btn btn-primary"
-          onClick={onResolve}
-          disabled={busy || ticket.status === "RESOLVED" || ticket.status === "CLOSED"}
-        >
+        <button className="btn btn-primary" onClick={onResolve} disabled={busy || isClosed}>
           Mark Resolved
         </button>
+
+        {isClosed && (
+          <button
+            className="btn"
+            onClick={() => setShowReopen((v) => !v)}
+            disabled={busy || !canReopen}
+            title={reopenBlockedReason ?? `${reopensLeft} reopen${reopensLeft === 1 ? "" : "s"} left`}
+          >
+            Reopen{canReopen ? ` (${reopensLeft} left)` : ""}
+          </button>
+        )}
       </div>
+
+      {isClosed && reopenBlockedReason && (
+        <div className="action-bar">
+          <span className="hint">{reopenBlockedReason}</span>
+        </div>
+      )}
+
+      {ticket.closureReason && (
+        <div className="action-bar">
+          <span className="hint">
+            <strong>Closed because:</strong> {ticket.closureReason}
+          </span>
+        </div>
+      )}
+
+      {showReopen && canReopen && (
+        <div className="action-bar">
+          <input
+            type="text"
+            placeholder="Why is this being reopened? (optional)"
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              onReopen(reopenReason);
+              setReopenReason("");
+              setShowReopen(false);
+            }}
+            disabled={busy}
+          >
+            Confirm Reopen
+          </button>
+        </div>
+      )}
 
       {showEscalate && (
         <div className="action-bar">
