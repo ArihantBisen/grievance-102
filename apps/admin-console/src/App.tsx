@@ -4,15 +4,17 @@ import { CategoriesTab } from "./components/CategoriesTab";
 import { TeamsTab } from "./components/TeamsTab";
 import { IdentitiesTab } from "./components/IdentitiesTab";
 import { OpsTab } from "./components/OpsTab";
+import { ReportsTab } from "./components/ReportsTab";
 import { clearSession, loadSession, saveSession, type Session } from "./auth";
 
-type Tab = "categories" | "teams" | "identities" | "ops";
+type Tab = "categories" | "teams" | "identities" | "ops" | "reports";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "categories", label: "Category Tree" },
   { key: "teams", label: "Resolvers & Teams" },
   { key: "identities", label: "Identities" },
   { key: "ops", label: "Ops" },
+  { key: "reports", label: "Reports" },
 ];
 
 export function App() {
@@ -61,6 +63,7 @@ export function App() {
       {tab === "teams" && <TeamsTab />}
       {tab === "identities" && <IdentitiesTab />}
       {tab === "ops" && <OpsTab />}
+      {tab === "reports" && <ReportsTab />}
     </div>
   );
 }

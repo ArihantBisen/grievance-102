@@ -87,6 +87,21 @@ export interface SyncRun {
   errorMessage: string | null;
 }
 
+export interface ReportsSummary {
+  totals: { all: number; open: number; breached: number };
+  breachRate: number;
+  avgResolutionHours: number | null;
+  byStatus: { status: string; count: number }[];
+  byTeam: { teamId: string; teamName: string; totalCount: number; openCount: number }[];
+  byCategory: { categoryId: string; categoryName: string; count: number }[];
+  resolverWorkload: { resolverId: string; resolverName: string; openCount: number }[];
+}
+
+export interface BulkCloseResult {
+  closedCount: number;
+  ticketIds: string[];
+}
+
 export const ALL_ROLES: Role[] = [
   "SBOSS_STAFF",
   "SBI_DEPUTED",
