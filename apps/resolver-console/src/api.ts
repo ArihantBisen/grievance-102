@@ -1,4 +1,11 @@
-import type { Resolver, Team, TicketDetail, TicketListItem } from "./types";
+import type {
+  BulkCloseResult,
+  QueueSummary,
+  Resolver,
+  Team,
+  TicketDetail,
+  TicketListItem,
+} from "./types";
 import { loadSession } from "./auth";
 
 async function json<T>(res: Response): Promise<T> {
@@ -59,6 +66,28 @@ export function reply(id: string, body: string): Promise<unknown> {
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ senderType: "RESOLVER", body }),
   }).then((r) => json(r));
+}
+
+export function fetchSummary(): Promise<QueueSummary> {
+  return fetch("/api/tickets/summary", { headers: authHeaders() }).then((r) => json<QueueSummary>(r));
+}
+
+// Closing always carries a reason: it's written onto each ticket and sent to the
+// requester as the closing message, so "why/how was this resolved" survives the close.
+export function bulkCloseTickets(ticketIds: string[], reason: string): Promise<BulkCloseResult> {
+  return fetch("/api/tickets/bulk-close", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticketIds, reason }),
+  }).then((r) => json<BulkCloseResult>(r));
+}
+
+export function reopenTicket(id: string, reason: string): Promise<TicketDetail> {
+  return fetch(`/api/tickets/${id}/reopen`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ reason: reason || undefined }),
+  }).then((r) => json<TicketDetail>(r));
 }
 
 export function escalate(id: string, reason: string): Promise<TicketDetail> {

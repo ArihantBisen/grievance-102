@@ -21,6 +21,7 @@ const OPEN_STATUSES: TicketStatus[] = [
   "NEEDS_RESOLVER_INPUT",
   "ESCALATED",
   "REASSIGNED",
+  "REOPENED",
 ];
 
 // GET /api/admin/identities?role=&employmentStatus=&search= — spec D2.

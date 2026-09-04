@@ -1,59 +1,185 @@
-/* SBOSS Grievance & Request System — design tokens (build spec Part C)
+/* SBOSS Grievance & Request System — design tokens
+   Implements the SBOSS Design Language (drawn from the Training & Attendance
+   platform's theme.js / index.css) so this tool reads as part of the same family:
+   one ink-navy brand pair, one desaturated slate-blue accent, warm-neutral greys
+   biased toward the accent hue, and semantic pairs for success/danger.
+
    Applies to every real product surface: Resolver Console, Admin Console, Website.
    Does NOT apply to anything simulating a WhatsApp thread — that stays in WhatsApp's
-   own native visual language (its header teal, its bubble green) by design. */
+   own native visual language by design. WhatsApp green appears only as a channel
+   indicator, never as a UI accent. */
 
 :root {
-  /* Ink & neutrals */
-  --ink: #1a1d24;
-  --sub: #5a6270;
-  --paper: #ffffff;
-  --bg: #f4f5f7;
-  --line: #e2e5ea;
-  --line-soft: #eceef2;
+  /* ---- SBOSS Design Language — canonical tokens ---- */
+  --color-primary: #2c4a63;
+  --color-primary-dark: #1d3346;
+  --color-accent: #4e7da6;
+  --color-accent-light: #eaf2fa;
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-border: #e3e8ef;
+  --color-text: #1f2d3a;
+  --color-text-muted: #6b7c89;
+  --color-success: #1e7e34;
+  --color-success-bg: #e8f5ea;
+  --color-danger: #d64545;
+  --color-danger-bg: #fceaea;
+  --color-whatsapp: #25d366;
 
-  /* Primary — SBOSS brand accent */
-  --accent: #0b5e4a;
-  --accent-soft: #e6f2ee;
-  --accent-line: #bfe0d5;
+  --radius-sm: 6px;   /* buttons, inputs */
+  --radius-md: 10px;  /* cards, tables */
+  --radius-lg: 16px;  /* modals, login card */
 
-  /* Semantic: informational */
-  --blue: #1f5c8f;
-  --blue-soft: #e8f0f8;
-  --blue-line: #c5daed;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 32, 0.06);
+  --shadow-md: 0 6px 20px rgba(16, 24, 32, 0.08);
 
-  /* Semantic: pending / warning / TAT approaching */
-  --amber: #9a6a12;
-  --amber-soft: #fbf1dc;
-  --amber-line: #ecd9a8;
+  --sidebar-width: 232px;
 
-  /* Semantic: breach / danger / escalation */
-  --red: #9a2d2d;
-  --red-soft: #fbeaea;
-  --red-line: #eecaca;
-
-  /* Semantic: confidential / restricted (HR track) */
-  --purple: #5b3b8c;
-  --purple-soft: #efe9f8;
-  --purple-line: #dccdf0;
-
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  /* ---- Legacy aliases ----
+     The three apps' stylesheets were written against these names. Mapping them onto
+     the canonical palette above re-skins every existing rule without touching a
+     single component file. Prefer the --color-* names in anything new. */
+  --ink: var(--color-text);
+  --sub: var(--color-text-muted);
+  --paper: var(--color-surface);
+  --bg: var(--color-bg);
+  --line: var(--color-border);
+  --line-soft: #edf1f6;
+
+  /* Primary brand pair — solid fills (buttons, active states, table headers) */
+  --accent: var(--color-primary);
+  --accent-soft: var(--color-accent-light);
+  --accent-line: #c9dcef;
+
+  /* Informational — the single accent blue does links, focus rings, active nav */
+  --blue: var(--color-accent);
+  --blue-soft: var(--color-accent-light);
+  --blue-line: #c9dcef;
+
+  /* Success — semantic state only, never decoration */
+  --green: var(--color-success);
+  --green-soft: var(--color-success-bg);
+  --green-line: #bfe0c8;
+
+  /* Pending / TAT-approaching — the one hue the source system doesn't define,
+     tuned here to sit with the navy-and-slate palette rather than shout over it. */
+  --amber: #8a6a1f;
+  --amber-soft: #fbf3e2;
+  --amber-line: #ead9b4;
+
+  /* Breach / danger / escalation */
+  --red: var(--color-danger);
+  --red-soft: var(--color-danger-bg);
+  --red-line: #f3d0d0;
+
+  /* Confidential / restricted (HR track) — kept distinct from the accent so a
+     confidential ticket never reads as merely "informational". */
+  --purple: #5b4a8c;
+  --purple-soft: #eeebf7;
+  --purple-line: #d5cdec;
+}
+
+/* Dark — a companion set, not an inversion. The navy reads muddy on a near-black
+   ground, so dark mode promotes the light theme's accent to primary and goes
+   brighter still for the accent role. The media query covers "system says dark";
+   the attribute selector covers an explicit in-app toggle and always wins. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-primary: #3e6a8f;
+    --color-primary-dark: #4e7da6;
+    --color-accent: #7fb0dc;
+    --color-accent-light: #1c3348;
+    --color-bg: #0f1922;
+    --color-surface: #17222c;
+    --color-border: #2b3944;
+    --color-text: #e8eef3;
+    --color-text-muted: #94a6b4;
+    --color-success: #3fcb6b;
+    --color-success-bg: #113321;
+    --color-danger: #f17171;
+    --color-danger-bg: #3b1717;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.5);
+
+    --line-soft: #223039;
+    --accent-line: #33506b;
+    --blue-line: #33506b;
+    --green-line: #1e5233;
+    --amber: #d9b166;
+    --amber-soft: #33280f;
+    --amber-line: #4d3d1a;
+    --red-line: #5c2626;
+    --purple: #a894d8;
+    --purple-soft: #241d38;
+    --purple-line: #3a3054;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-primary: #3e6a8f;
+  --color-primary-dark: #4e7da6;
+  --color-accent: #7fb0dc;
+  --color-accent-light: #1c3348;
+  --color-bg: #0f1922;
+  --color-surface: #17222c;
+  --color-border: #2b3944;
+  --color-text: #e8eef3;
+  --color-text-muted: #94a6b4;
+  --color-success: #3fcb6b;
+  --color-success-bg: #113321;
+  --color-danger: #f17171;
+  --color-danger-bg: #3b1717;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.5);
+
+  --line-soft: #223039;
+  --accent-line: #33506b;
+  --blue-line: #33506b;
+  --green-line: #1e5233;
+  --amber: #d9b166;
+  --amber-soft: #33280f;
+  --amber-line: #4d3d1a;
+  --red-line: #5c2626;
+  --purple: #a894d8;
+  --purple-soft: #241d38;
+  --purple-line: #3a3054;
 }
 
 body {
   margin: 0;
   font-family: var(--font-ui);
-  color: var(--ink);
-  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Type roles — hierarchy comes from weight and size, never from mixing families. */
+h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 17px; font-weight: 600; }
+h3 { font-size: 15px; font-weight: 600; }
 
 .mono {
   font-family: var(--font-mono);
+  font-size: 12.5px;
 }
 
-/* Status badges — pill shape, -soft background + solid text color, uppercase, bold.
-   Usage rule: never the solid color as a fill, only as text/border on a -soft background. */
+/* Overline label — muted captions get uppercase tracking. */
+.overline {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Status badges — pill-shaped, tinted background at roughly 10% strength.
+   Usage rule: never the solid color as a fill, only as text/border on a tint. */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -62,11 +188,13 @@ body {
   font-size: 10.5px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   border: 1px solid transparent;
+  white-space: nowrap;
 }
-.badge-accent { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.badge-accent { background: var(--accent-soft); color: var(--color-primary); border-color: var(--accent-line); }
 .badge-blue   { background: var(--blue-soft);   color: var(--blue);   border-color: var(--blue-line); }
+.badge-green  { background: var(--green-soft);  color: var(--green);  border-color: var(--green-line); }
 .badge-amber  { background: var(--amber-soft);  color: var(--amber);  border-color: var(--amber-line); }
 .badge-red    { background: var(--red-soft);    color: var(--red);    border-color: var(--red-line); }
 .badge-purple { background: var(--purple-soft); color: var(--purple); border-color: var(--purple-line); }
@@ -79,46 +207,98 @@ body {
   border-radius: 50%;
   margin-right: 6px;
 }
-.sla-dot-green { background: var(--accent); }
+.sla-dot-green { background: var(--color-success); }
 .sla-dot-amber { background: var(--amber); }
-.sla-dot-red   { background: var(--red); }
+.sla-dot-red   { background: var(--color-danger); }
 
-/* Cards */
+/* Cards — resting hairline lift; the hover lift is opt-in via .hover-card. */
 .card {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
-/* Tables */
-table.data-table { width: 100%; border-collapse: collapse; }
+/* Hover-card — border shifts to accent, shadow lifts to md, card rises 1px.
+   0.15s ease on color/shadow, 0.1s on transform. */
+.hover-card {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  cursor: pointer;
+}
+.hover-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* Tables — sticky header fills solid primary, always white text, never tinted. */
+table.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
 table.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   font-size: 11px;
-  color: var(--sub);
-  background: var(--bg);
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--color-primary);
   text-align: left;
-  padding: 8px 12px;
+  padding: 10px 12px;
 }
 table.data-table tbody td {
-  padding: 10px 12px;
-  border-top: 1px solid var(--line);
+  padding: 11px 12px;
+  border-top: 1px solid var(--color-border);
   font-size: 14px;
 }
+table.data-table tbody tr:first-child td { border-top: none; }
+table.data-table tbody tr:hover td { background: var(--color-accent-light); }
 
 /* Callouts */
 .callout {
-  border-left: 3px solid var(--line);
-  background: var(--bg);
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-accent-light);
   padding: 10px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .callout-label {
   font-weight: 700;
   text-transform: uppercase;
   font-size: 11px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   margin-bottom: 4px;
   display: block;
 }
+
+/* Focus ring — a 3px accent-light box-shadow, applied instantly. Never animated:
+   it has to register immediately for keyboard users. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-light);
+}
+
+/* Baseline form controls — inputs and buttons stay on the tight radius. */
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  transition: border-color 0.15s ease;
+}
+input::placeholder,
+textarea::placeholder { color: var(--color-text-muted); }

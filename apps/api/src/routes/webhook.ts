@@ -18,6 +18,7 @@ const OPEN_STATUSES: TicketStatus[] = [
   "NEEDS_RESOLVER_INPUT",
   "ESCALATED",
   "REASSIGNED",
+  "REOPENED",
 ];
 
 const GREETING_KEYWORDS = new Set(["hi", "hello", "hey", "start", "menu", "hii", "hola"]);

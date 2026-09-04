@@ -1,159 +1,214 @@
+/* Grievance Portal (citizen-facing) — layered on the shared SBOSS design tokens.
+   This is the one surface an employee sees, usually on a phone straight from a
+   WhatsApp link, so it stays single-column, generously spaced, and touch-sized. */
+
+/* ---- Brand header ---- */
+.portal-header {
+  background: var(--color-primary);
+  color: #ffffff;
+  padding: 16px 20px;
+}
+.portal-header-inner {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.portal-header .brand {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.portal-header .brand-sub {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
 .page {
   max-width: 640px;
   margin: 0 auto;
-  padding: 32px 20px 80px;
+  padding: 28px 20px 80px;
 }
 
-.page-header {
-  margin-bottom: 24px;
-}
+.page-header { margin-bottom: 22px; }
 .page-header h1 {
-  font-size: 20px;
-  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+  color: var(--color-text);
 }
 .page-header p {
-  color: var(--sub);
+  color: var(--color-text-muted);
   margin: 0;
   font-size: 14px;
 }
 
+/* ---- Identity strip ---- */
 .identity-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 20px;
-  padding: 12px 16px;
-  margin-bottom: 24px;
+  gap: 10px 24px;
+  padding: 14px 16px;
+  margin-bottom: 22px;
   font-size: 13px;
+  background: var(--color-accent-light);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
 }
-.identity-strip strong { color: var(--ink); }
-.identity-strip span { color: var(--sub); }
+.identity-strip strong { color: var(--color-text); font-weight: 600; }
+.identity-strip span { color: var(--color-text-muted); }
 
-.steps {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
-}
+/* ---- Step indicator ---- */
+.steps { display: flex; gap: 8px; margin-bottom: 22px; }
 .step-pill {
   flex: 1;
   text-align: center;
-  padding: 8px 4px;
+  padding: 9px 4px;
   font-size: 12px;
   font-weight: 600;
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--sub);
-  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .step-pill.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent-line);
+  background: var(--color-primary);
+  color: #ffffff;
+  border-color: var(--color-primary);
 }
 .step-pill.done {
-  background: var(--paper);
-  color: var(--accent);
+  background: var(--color-accent-light);
+  color: var(--color-primary);
+  border-color: var(--accent-line);
 }
 
-.form-section { padding: 20px; margin-bottom: 16px; }
-.form-row { margin-bottom: 16px; }
+/* ---- Form ---- */
+.form-section { padding: 22px; margin-bottom: 16px; }
+.form-row { margin-bottom: 18px; }
+.form-row:last-child { margin-bottom: 0; }
 .form-row label {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  margin-bottom: 6px;
-  color: var(--ink);
+  margin-bottom: 7px;
+  color: var(--color-text);
 }
 .form-row select,
 .form-row input[type="text"],
 .form-row textarea {
   width: 100%;
   box-sizing: border-box;
-  padding: 9px 11px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 15px;
   font-family: var(--font-ui);
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: border-color 0.15s ease;
 }
-.form-row textarea { resize: vertical; min-height: 90px; }
-.hint { font-size: 12px; color: var(--sub); margin-top: 4px; }
+.form-row textarea { resize: vertical; min-height: 104px; line-height: 1.5; }
+.hint { font-size: 12.5px; color: var(--color-text-muted); margin-top: 6px; }
 
-.attachment-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
+.attachment-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .attachment-row input { flex: 1; }
 
+/* ---- Ticket type toggle ---- */
+.ticket-type-toggle { display: flex; gap: 8px; margin-bottom: 22px; }
+.ticket-type-toggle button {
+  flex: 1;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.ticket-type-toggle button:hover { border-color: var(--color-accent); color: var(--color-text); }
+.ticket-type-toggle button.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
+}
+
+/* ---- Buttons ---- */
 .btn {
   appearance: none;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  color: var(--ink);
-  padding: 9px 16px;
-  border-radius: 8px;
+  font-family: inherit;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 11px 18px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.btn:hover { background: var(--bg); }
+.btn:hover { background: var(--color-accent-light); border-color: var(--color-accent); }
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--paper);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
 }
-.btn-primary:hover { opacity: 0.92; }
+.btn-primary:hover { background: var(--color-primary-dark); border-color: var(--color-primary-dark); }
 .btn-primary:disabled, .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--color-surface); border-color: var(--color-border); }
 .btn-text {
   border: none;
   background: none;
-  color: var(--sub);
-  padding: 4px 0;
+  color: var(--color-text-muted);
+  padding: 6px 0;
   font-size: 13px;
 }
+.btn-text:hover { background: none; color: var(--color-text); }
 
-.actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 20px;
-}
+.actions { display: flex; justify-content: space-between; margin-top: 22px; gap: 12px; }
 
-.review-block { margin-bottom: 16px; }
-.review-block dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--sub); }
-.review-block dd { margin: 2px 0 0; font-size: 14px; }
-
-.ticket-type-toggle {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-.ticket-type-toggle button {
-  flex: 1;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  cursor: pointer;
-  font-size: 13px;
+/* ---- Review step ---- */
+.review-block { margin-bottom: 18px; }
+.review-block dt {
+  font-size: 12px;
   font-weight: 600;
-  color: var(--sub);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
 }
-.ticket-type-toggle button.active {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-}
+.review-block dd { margin: 4px 0 0; font-size: 15px; }
 
-.confirmation { text-align: center; padding: 48px 20px; }
-.confirmation .ticket-id { font-family: var(--font-mono); font-size: 15px; margin: 12px 0; }
+/* ---- Confirmation ---- */
+.confirmation { text-align: center; padding: 44px 24px; }
+.confirmation h2 { font-size: 22px; font-weight: 700; margin: 0 0 8px; }
+.confirmation .ticket-id {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 14px 0;
+  padding: 12px 16px;
+  display: inline-block;
+  background: var(--color-accent-light);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-primary);
+}
 
 .error-banner {
-  background: var(--red-soft);
+  background: var(--color-danger-bg);
   border: 1px solid var(--red-line);
-  color: var(--red);
-  padding: 10px 14px;
-  border-radius: 8px;
+  color: var(--color-danger);
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
+  font-weight: 500;
   margin-bottom: 16px;
 }

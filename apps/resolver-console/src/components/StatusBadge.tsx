@@ -8,8 +8,9 @@ const STATUS_CLASS: Record<TicketStatus, string> = {
   NEEDS_RESOLVER_INPUT: "badge-amber",
   ESCALATED: "badge-red",
   REASSIGNED: "badge-amber",
-  RESOLVED: "badge-accent",
-  CLOSED: "badge-accent",
+  REOPENED: "badge-purple",
+  RESOLVED: "badge-green",
+  CLOSED: "badge-green",
 };
 
 export function StatusBadge({ status }: { status: TicketStatus }) {
