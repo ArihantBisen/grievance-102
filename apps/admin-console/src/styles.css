@@ -91,6 +91,12 @@
 .stat-tile-alert { background: var(--color-danger-bg); border-color: var(--red-line); }
 .stat-tile-alert .stat-tile-value { color: var(--color-danger); }
 .stat-tile-alert .stat-tile-label { color: var(--color-danger); opacity: 0.8; }
+.stat-tile-delta {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 6px;
+  color: var(--color-text-muted);
+}
 
 /* ---- Banners & empty states ---- */
 .error-banner {

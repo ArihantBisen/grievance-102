@@ -98,6 +98,20 @@ export interface ReportsSummary {
   resolverWorkload: { resolverId: string; resolverName: string; openCount: number }[];
 }
 
+export interface ReportsFilters {
+  categoryId?: string;
+  subcategoryId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  compare: boolean;
+}
+
+export interface ReportsResponse {
+  current: ReportsSummary;
+  previous: ReportsSummary | null;
+  filters: ReportsFilters;
+}
+
 export interface BulkCloseResult {
   closedCount: number;
   ticketIds: string[];

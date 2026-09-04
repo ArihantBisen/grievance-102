@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { bulkCloseTickets, fetchReportsSummary, fetchTeams } from "../api";
-import type { ReportsSummary, Team } from "../types";
+import { useEffect, useMemo, useState } from "react";
+import { bulkCloseTickets, fetchCategoryTree, fetchReportsSummary, fetchTeams } from "../api";
+import type { Department, ReportsSummary, Team } from "../types";
 
 function formatHours(hours: number | null): string {
   if (hours === null) return "—";
@@ -8,10 +8,42 @@ function formatHours(hours: number | null): string {
   return `${(hours / 24).toFixed(1)}d`;
 }
 
+// Renders a small delta line under a stat tile comparing `current` to `previous`.
+// `lowerIsBetter` flips which direction counts as "good" (e.g. breach rate, resolution
+// time) — ticket volume has no inherently good direction, so it stays neutral.
+function Delta({
+  current,
+  previous,
+  lowerIsBetter,
+}: {
+  current: number;
+  previous: number;
+  lowerIsBetter?: boolean;
+}) {
+  if (previous === 0) {
+    if (current === 0) return null;
+    return <div className="stat-tile-delta">new this period</div>;
+  }
+  const pct = ((current - previous) / previous) * 100;
+  if (Math.abs(pct) < 0.05) return <div className="stat-tile-delta">flat vs previous period</div>;
+  const up = pct > 0;
+  const good = lowerIsBetter === undefined ? null : lowerIsBetter ? !up : up;
+  const color = good === null ? "var(--sub)" : good ? "var(--color-success)" : "var(--color-danger)";
+  return (
+    <div className="stat-tile-delta" style={{ color }}>
+      {up ? "+" : ""}
+      {pct.toFixed(1)}% vs previous period
+    </div>
+  );
+}
+
 export function ReportsTab() {
-  const [summary, setSummary] = useState<ReportsSummary | null>(null);
+  const [current, setCurrent] = useState<ReportsSummary | null>(null);
+  const [previous, setPrevious] = useState<ReportsSummary | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [tree, setTree] = useState<Department[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const [identityId, setIdentityId] = useState("");
   const [teamId, setTeamId] = useState("");
@@ -19,14 +51,50 @@ export function ReportsTab() {
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
 
+  // Report filters — independent of the bulk-close filters above.
+  const [departmentId, setDepartmentId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [subcategoryId, setSubcategoryId] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [compare, setCompare] = useState(false);
+
+  const categories = useMemo(
+    () => tree.find((d) => d.id === departmentId)?.categories ?? [],
+    [tree, departmentId]
+  );
+  const subcategories = useMemo(
+    () => categories.find((c) => c.id === categoryId)?.subcategories ?? [],
+    [categories, categoryId]
+  );
+  const canCompare = Boolean(dateFrom && dateTo);
+
   function refresh() {
-    fetchReportsSummary().then(setSummary).catch((e) => setError(e.message));
+    setLoading(true);
+    fetchReportsSummary({
+      categoryId: categoryId || undefined,
+      subcategoryId: subcategoryId || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      compare: canCompare && compare,
+    })
+      .then((r) => {
+        setCurrent(r.current);
+        setPrevious(r.previous);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }
 
   useEffect(() => {
     refresh();
     fetchTeams().then(setTeams).catch((e) => setError(e.message));
+    fetchCategoryTree().then(setTree).catch((e) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(refresh, [categoryId, subcategoryId, dateFrom, dateTo, compare]);
 
   async function runBulkClose() {
     if (!identityId && !teamId && !olderThanHours) {
@@ -91,7 +159,93 @@ export function ReportsTab() {
         {lastResult && <p style={{ marginTop: 8, fontSize: 13 }}>{lastResult}</p>}
       </div>
 
-      {!summary ? (
+      <div className="card panel">
+        <h2>Report filters</h2>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            value={departmentId}
+            onChange={(e) => {
+              setDepartmentId(e.target.value);
+              setCategoryId("");
+              setSubcategoryId("");
+            }}
+          >
+            <option value="">Department…</option>
+            {tree.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={categoryId}
+            disabled={!departmentId}
+            onChange={(e) => {
+              setCategoryId(e.target.value);
+              setSubcategoryId("");
+            }}
+          >
+            <option value="">Category…</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <select value={subcategoryId} disabled={!categoryId} onChange={(e) => setSubcategoryId(e.target.value)}>
+            <option value="">Sub-category…</option>
+            {subcategories.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+            From
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+            To
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              opacity: canCompare ? 1 : 0.5,
+            }}
+            title={canCompare ? "" : "Set both From and To dates to enable comparison"}
+          >
+            <input
+              type="checkbox"
+              checked={compare}
+              disabled={!canCompare}
+              onChange={(e) => setCompare(e.target.checked)}
+            />
+            Compare to previous period
+          </label>
+          {(departmentId || categoryId || subcategoryId || dateFrom || dateTo) && (
+            <button
+              className="btn"
+              style={{ padding: "3px 10px", fontSize: 11 }}
+              onClick={() => {
+                setDepartmentId("");
+                setCategoryId("");
+                setSubcategoryId("");
+                setDateFrom("");
+                setDateTo("");
+                setCompare(false);
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loading || !current ? (
         <div className="card panel">
           <div className="empty-state">Loading…</div>
         </div>
@@ -101,24 +255,35 @@ export function ReportsTab() {
             <h2>Ticket volume &amp; TAT performance</h2>
             <div className="stat-tile-row">
               <div className="stat-tile">
-                <div className="stat-tile-value">{summary.totals.all}</div>
+                <div className="stat-tile-value">{current.totals.all}</div>
                 <div className="stat-tile-label">Total tickets</div>
+                {previous && <Delta current={current.totals.all} previous={previous.totals.all} />}
               </div>
               <div className="stat-tile">
-                <div className="stat-tile-value">{summary.totals.open}</div>
+                <div className="stat-tile-value">{current.totals.open}</div>
                 <div className="stat-tile-label">Currently open</div>
+                {previous && <Delta current={current.totals.open} previous={previous.totals.open} />}
               </div>
-              <div className={`stat-tile${summary.totals.breached > 0 ? " stat-tile-alert" : ""}`}>
-                <div className="stat-tile-value">{summary.totals.breached}</div>
-                <div className="stat-tile-label">Breached (all-time)</div>
+              <div className={`stat-tile${current.totals.breached > 0 ? " stat-tile-alert" : ""}`}>
+                <div className="stat-tile-value">{current.totals.breached}</div>
+                <div className="stat-tile-label">Breached (in range)</div>
+                {previous && (
+                  <Delta current={current.totals.breached} previous={previous.totals.breached} lowerIsBetter />
+                )}
               </div>
-              <div className={`stat-tile${summary.breachRate > 0.1 ? " stat-tile-alert" : ""}`}>
-                <div className="stat-tile-value">{(summary.breachRate * 100).toFixed(1)}%</div>
+              <div className={`stat-tile${current.breachRate > 0.1 ? " stat-tile-alert" : ""}`}>
+                <div className="stat-tile-value">{(current.breachRate * 100).toFixed(1)}%</div>
                 <div className="stat-tile-label">Breach rate</div>
+                {previous && (
+                  <Delta current={current.breachRate * 100} previous={previous.breachRate * 100} lowerIsBetter />
+                )}
               </div>
               <div className="stat-tile">
-                <div className="stat-tile-value">{formatHours(summary.avgResolutionHours)}</div>
+                <div className="stat-tile-value">{formatHours(current.avgResolutionHours)}</div>
                 <div className="stat-tile-label">Avg. resolution time</div>
+                {previous && current.avgResolutionHours !== null && previous.avgResolutionHours !== null && (
+                  <Delta current={current.avgResolutionHours} previous={previous.avgResolutionHours} lowerIsBetter />
+                )}
               </div>
             </div>
           </div>
@@ -133,7 +298,7 @@ export function ReportsTab() {
                 </tr>
               </thead>
               <tbody>
-                {summary.byStatus.map((s) => (
+                {current.byStatus.map((s) => (
                   <tr key={s.status}>
                     <td>{s.status.replace(/_/g, " ")}</td>
                     <td>{s.count}</td>
@@ -154,7 +319,7 @@ export function ReportsTab() {
                 </tr>
               </thead>
               <tbody>
-                {summary.byTeam.map((t) => (
+                {current.byTeam.map((t) => (
                   <tr key={t.teamId}>
                     <td>{t.teamName}</td>
                     <td>{t.openCount}</td>
@@ -167,8 +332,8 @@ export function ReportsTab() {
 
           <div className="card panel">
             <h2>Top categories by volume</h2>
-            {summary.byCategory.length === 0 ? (
-              <div className="empty-state">No tickets yet.</div>
+            {current.byCategory.length === 0 ? (
+              <div className="empty-state">No tickets match these filters.</div>
             ) : (
               <table className="data-table">
                 <thead>
@@ -178,7 +343,7 @@ export function ReportsTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {summary.byCategory.map((c) => (
+                  {current.byCategory.map((c) => (
                     <tr key={c.categoryId}>
                       <td>{c.categoryName}</td>
                       <td>{c.count}</td>
@@ -191,8 +356,8 @@ export function ReportsTab() {
 
           <div className="card panel">
             <h2>Resolver workload (open tickets)</h2>
-            {summary.resolverWorkload.length === 0 ? (
-              <div className="empty-state">No resolver has any open tickets right now.</div>
+            {current.resolverWorkload.length === 0 ? (
+              <div className="empty-state">No resolver has any open tickets matching these filters.</div>
             ) : (
               <table className="data-table">
                 <thead>
@@ -202,7 +367,7 @@ export function ReportsTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {summary.resolverWorkload.map((r) => (
+                  {current.resolverWorkload.map((r) => (
                     <tr key={r.resolverId}>
                       <td>{r.resolverName}</td>
                       <td>{r.openCount}</td>
