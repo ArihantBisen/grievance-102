@@ -134,7 +134,7 @@ export function Queue({
                 onClick={(e) => e.stopPropagation()}
                 onChange={() => onToggleSelected(t.id)}
               />
-              <span className="ticket-id">{t.id.slice(-8)}</span>
+              <span className="ticket-id">{t.ticketNumber ?? t.id.slice(-8)}</span>
               <span className="ticket-cat">
                 {t.category.name}
                 {t.subcategory ? ` · ${t.subcategory.name}` : ""}

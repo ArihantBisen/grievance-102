@@ -98,7 +98,7 @@ export function OpsTab() {
             <tbody>
               {orphaned.map((t) => (
                 <tr key={t.id}>
-                  <td className="mono" style={{ fontSize: 12 }}>{t.id}</td>
+                  <td className="mono" style={{ fontSize: 12 }}>{t.ticketNumber ?? t.id}</td>
                   <td>{t.identity.name} ({t.identity.externalId})</td>
                   <td>
                     {t.category.name}

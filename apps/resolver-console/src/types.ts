@@ -19,6 +19,7 @@ export interface Resolver {
 
 export interface TicketListItem {
   id: string;
+  ticketNumber: string | null;
   ticketType: TicketType;
   status: TicketStatus;
   priority: string;

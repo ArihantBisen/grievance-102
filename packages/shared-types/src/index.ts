@@ -72,3 +72,21 @@ export interface AttachmentRequest {
   uploadedBy: string;
   messageId?: string;
 }
+
+// Global ticket-number formatting ("#IT-00001") — one counter shared across every
+// department (TicketSequence in packages/db), not a per-department count. The prefix
+// just labels which department a ticket belongs to; the digits reflect overall
+// grievance-creation order system-wide. See apps/api's tickets route for where the
+// counter is atomically claimed, and webhook.ts for how a citizen's typed-back
+// reference gets matched against it.
+export function formatTicketNumber(prefix: string, counter: number): string {
+  return `#${prefix}-${String(counter).padStart(5, "0")}`;
+}
+
+// Loosens an inbound WhatsApp reply enough to match a ticket number typed with
+// inconsistent punctuation/spacing/case ("IT-00001", "#it00001", "it 00001 fyi") — strips
+// everything but letters and digits from both sides before comparing, so only the
+// meaningful characters matter.
+export function stripToAlphanumeric(text: string): string {
+  return text.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}

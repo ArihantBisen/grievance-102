@@ -92,9 +92,19 @@ enum Role {
 model Department {
   id          String     @id @default(cuid())
   name        String     @unique
+  prefix      String     @unique   // ticket-number prefix (HR/BUS/FIN/IT) — see formatTicketNumber in @sboss/shared-types
   categories  Category[]
   teams       Team[]
   tickets     Ticket[]   // opposite side of Ticket.department — required by Prisma, missing from the spec's verbatim schema
+}
+
+// One global row, incremented atomically (UPDATE ... RETURNING under the ticket-
+// creation transaction) to hand out ticket numbers in overall creation order across
+// every department — not a per-department counter. id is always 1; there is exactly
+// one row, seeded by the migration that introduced this table.
+model TicketSequence {
+  id      Int @id @default(1)
+  counter Int @default(0)
 }
 
 model Category {
@@ -170,6 +180,12 @@ model EscalationContact {
 // ============================================================
 model Ticket {
   id             String       @id @default(cuid())
+  ticketNumber   String?      @unique  // "#IT-00001" — global sequence (TicketSequence),
+                                        // not per-department. Nullable: only GRIEVANCE
+                                        // tickets are numbered for now (apps/api's tickets
+                                        // route); a REQUEST ticket, and any ticket created
+                                        // before this column existed, stays null — every
+                                        // display/matching site falls back to id.slice(-8).
   identityId     String
   identity       Identity     @relation(fields: [identityId], references: [id])
   departmentId   String

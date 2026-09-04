@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Role, TicketStatus, TicketType } from "@prisma/client";
+import { formatTicketNumber } from "@sboss/shared-types";
 import { asyncHandler, HttpError } from "../lib/asyncHandler";
 import { withRlsContext, withSystemRls } from "../lib/rls";
 import { requireAuth } from "../middleware/auth";
@@ -147,14 +148,14 @@ ticketsRouter.post(
       startOfDay.setHours(0, 0, 0, 0);
       const sameDayDuplicate = await tx.ticket.findFirst({
         where: { identityId, subcategoryId, createdAt: { gte: startOfDay } },
-        select: { id: true },
+        select: { id: true, ticketNumber: true },
       });
       if (sameDayDuplicate) {
         throw new HttpError(
           409,
-          `You've already raised a ticket under "${subcategory.name}" today (reference ${sameDayDuplicate.id.slice(
-            -8
-          )}). Reply on that ticket instead of raising a new one, or pick a different sub-category.`
+          `You've already raised a ticket under "${subcategory.name}" today (reference ${
+            sameDayDuplicate.ticketNumber ?? sameDayDuplicate.id.slice(-8)
+          }). Reply on that ticket instead of raising a new one, or pick a different sub-category.`
         );
       }
 
@@ -162,8 +163,29 @@ ticketsRouter.post(
       const tatDueAt = new Date(Date.now() + tatHours * 60 * 60 * 1000);
       const now = new Date();
 
+      // Global ticket number ("#IT-00001") — grievances only, for now (REQUEST tickets
+      // stay unnumbered; every downstream display/matching site falls back to the cuid
+      // suffix when ticketNumber is null). Claiming the next number is a single atomic
+      // UPDATE ... RETURNING on the one TicketSequence row, inside this same
+      // transaction — under Postgres row locking, two concurrent ticket creations
+      // serialize on that row and can never receive the same number, and a rolled-back
+      // creation rolls the increment back with it (no gaps).
+      let ticketNumber: string | undefined;
+      if (requestedType === "GRIEVANCE") {
+        const seq = await tx.ticketSequence.update({
+          where: { id: 1 },
+          data: { counter: { increment: 1 } },
+        });
+        const department = await tx.department.findUniqueOrThrow({
+          where: { id: subcategory.category.departmentId },
+          select: { prefix: true },
+        });
+        ticketNumber = formatTicketNumber(department.prefix, seq.counter);
+      }
+
       const created = await tx.ticket.create({
         data: {
+          ticketNumber,
           identityId,
           departmentId: subcategory.category.departmentId,
           categoryId,
@@ -194,15 +216,16 @@ ticketsRouter.post(
       // Formatted as a ticket card using WhatsApp's own markup (*bold*) rather than
       // the rich HTML the email template uses — WhatsApp renders no HTML, colours, or
       // layout, so the card has to be carried by labelled lines and bold weight alone.
-      // The reference shown is the same trailing-8 short code the webhook's "status"
-      // and multi-ticket flows accept back, so what the citizen is shown is exactly
-      // what they can reply with.
+      // The reference shown is the same value the webhook's "status" and multi-ticket
+      // flows accept back, so what the citizen is shown is exactly what they can reply
+      // with — the real ticket number for a grievance, or the old cuid suffix for a
+      // not-yet-numbered request.
       await tx.message.create({
         data: {
           ticketId: created.id,
           senderType: "SYSTEM",
           body: buildTicketCard({
-            reference: created.id.slice(-8),
+            reference: created.ticketNumber ?? created.id.slice(-8),
             identityName: identity.name,
             ticketType: requestedType,
             categoryName: subcategory.category.name,

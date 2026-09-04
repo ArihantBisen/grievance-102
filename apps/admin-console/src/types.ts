@@ -68,6 +68,7 @@ export interface UnknownContact {
 
 export interface OrphanedTicket {
   id: string;
+  ticketNumber: string | null;
   status: string;
   createdAt: string;
   identity: { id: string; name: string; externalId: string };
