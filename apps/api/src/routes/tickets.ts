@@ -210,7 +210,18 @@ ticketsRouter.post(
             createdAt: now,
             tatDueAt,
           }),
-          channelType: channel === "WEB" ? "TEMPLATE" : "FREETEXT",
+          // FREETEXT regardless of which channel the ticket was filed through. The
+          // channel a ticket came in on says nothing about whether WhatsApp's 24hr
+          // customer-service window is open — and it almost always is here, since the
+          // citizen texted in to get the submission link moments earlier (ticket
+          // creation stamps lastInboundAt = now, just above). Marking this TEMPLATE
+          // because channel === "WEB" meant every web-form confirmation went out as an
+          // approved-template send referencing `sboss_ticket_update`, which has never
+          // been submitted to Meta — so Meta rejected it and the requester silently got
+          // no confirmation at all. The Outbox Worker re-checks the window at dispatch
+          // time and upgrades to TEMPLATE by itself if it has genuinely closed, which is
+          // the only thing that should decide this.
+          channelType: "FREETEXT",
         },
       });
 
