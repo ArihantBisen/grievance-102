@@ -4,7 +4,7 @@ import type {
   Department,
   Identity,
   OrphanedTicket,
-  ReportsSummary,
+  ReportsResponse,
   Resolver,
   SyncRun,
   Team,
@@ -126,8 +126,25 @@ export function fetchMetrics(): Promise<Metrics> {
   return fetch("/api/admin/metrics", { headers: authHeaders() }).then((r) => json<Metrics>(r));
 }
 
-export function fetchReportsSummary(): Promise<ReportsSummary> {
-  return fetch("/api/admin/reports/summary", { headers: authHeaders() }).then((r) => json<ReportsSummary>(r));
+export interface ReportsQuery {
+  categoryId?: string;
+  subcategoryId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  compare?: boolean;
+}
+
+export function fetchReportsSummary(query: ReportsQuery = {}): Promise<ReportsResponse> {
+  const params = new URLSearchParams();
+  if (query.categoryId) params.set("categoryId", query.categoryId);
+  if (query.subcategoryId) params.set("subcategoryId", query.subcategoryId);
+  if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+  if (query.dateTo) params.set("dateTo", query.dateTo);
+  if (query.compare) params.set("compare", "true");
+  const qs = params.toString();
+  return fetch(`/api/admin/reports/summary${qs ? `?${qs}` : ""}`, { headers: authHeaders() }).then((r) =>
+    json<ReportsResponse>(r)
+  );
 }
 
 export interface BulkCloseFilters {

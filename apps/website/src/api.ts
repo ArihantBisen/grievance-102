@@ -18,12 +18,12 @@ export function fetchCategories(role: string, ticketType: string): Promise<Depar
   return fetch(`/api/categories?${params}`).then((r) => json<DepartmentTree[]>(r));
 }
 
-export function createTicket(payload: CreateTicketRequest): Promise<{ id: string }> {
+export function createTicket(payload: CreateTicketRequest): Promise<{ id: string; ticketNumber: string | null }> {
   return fetch("/api/tickets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => json<{ id: string }>(r));
+  }).then((r) => json<{ id: string; ticketNumber: string | null }>(r));
 }
 
 export function addAttachment(ticketId: string, fileUrl: string, uploadedBy: string) {

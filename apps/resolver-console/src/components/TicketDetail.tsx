@@ -64,7 +64,7 @@ export function TicketDetail({
           </h2>
           <div className="detail-meta">
             {ticket.identity.name} ({ticket.identity.role}) · {ticket.ticketType} ·{" "}
-            <span className="mono">{ticket.id}</span>
+            <span className="mono">{ticket.ticketNumber ?? ticket.id}</span>
           </div>
           {ticket.referenceNote && <div className="detail-meta">Ref: {ticket.referenceNote}</div>}
           {ticket.isConfidential && (

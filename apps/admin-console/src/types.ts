@@ -68,6 +68,7 @@ export interface UnknownContact {
 
 export interface OrphanedTicket {
   id: string;
+  ticketNumber: string | null;
   status: string;
   createdAt: string;
   identity: { id: string; name: string; externalId: string };
@@ -95,6 +96,20 @@ export interface ReportsSummary {
   byTeam: { teamId: string; teamName: string; totalCount: number; openCount: number }[];
   byCategory: { categoryId: string; categoryName: string; count: number }[];
   resolverWorkload: { resolverId: string; resolverName: string; openCount: number }[];
+}
+
+export interface ReportsFilters {
+  categoryId?: string;
+  subcategoryId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  compare: boolean;
+}
+
+export interface ReportsResponse {
+  current: ReportsSummary;
+  previous: ReportsSummary | null;
+  filters: ReportsFilters;
 }
 
 export interface BulkCloseResult {

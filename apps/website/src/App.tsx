@@ -37,6 +37,7 @@ export function App() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [ticketId, setTicketId] = useState<string | null>(null);
+  const [ticketNumber, setTicketNumber] = useState<string | null>(null);
 
   useEffect(() => {
     if (!identityId) return;
@@ -77,6 +78,7 @@ export function App() {
         }
       }
       setTicketId(ticket.id);
+      setTicketNumber(ticket.ticketNumber);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
     } finally {
@@ -113,7 +115,7 @@ export function App() {
   if (ticketId) {
     return (
       <div className="page">
-        <Confirmation ticketId={ticketId} />
+        <Confirmation ticketId={ticketId} ticketNumber={ticketNumber} />
       </div>
     );
   }

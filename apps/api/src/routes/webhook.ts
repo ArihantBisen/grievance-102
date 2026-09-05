@@ -1,9 +1,16 @@
 import { Router } from "express";
 import type { TicketStatus } from "@prisma/client";
 import { fetchMetaMedia, getNotificationSender, verifyMetaSignature } from "@sboss/whatsapp-client";
+import { stripToAlphanumeric } from "@sboss/shared-types";
 import { withSystemRls } from "../lib/rls";
 import { asyncHandler } from "../lib/asyncHandler";
 import { LocalDiskStorage } from "../lib/storage";
+
+// The reference shown to a citizen — the real ticket number for a numbered grievance,
+// or the old cuid suffix for a not-yet-numbered (REQUEST) ticket.
+function ticketReference(t: { id: string; ticketNumber: string | null }): string {
+  return t.ticketNumber ?? t.id.slice(-8);
+}
 
 export const webhookRouter = Router();
 
@@ -145,7 +152,7 @@ async function processInboundMessage(wamid: string, from: string, text: string):
     if (normalized === "status") {
       const summary = openTickets
         .slice(0, 5)
-        .map((t) => `• ${t.id.slice(-8)} — ${t.category.name} — ${t.status.replace(/_/g, " ")}`)
+        .map((t) => `• ${ticketReference(t)} — ${t.category.name} — ${t.status.replace(/_/g, " ")}`)
         .join("\n");
       await sender.send({
         ticketId: null,
@@ -160,17 +167,21 @@ async function processInboundMessage(wamid: string, from: string, text: string):
     // With more than one open ticket, a reply is only unambiguous once it's tied to a
     // specific ticket — either there's exactly one open ticket already, or the citizen
     // led with that ticket's reference (the code the disambiguation prompt below hands
-    // out), e.g. "9j6rl0me still waiting on this". Without this match, the prompt below
-    // had no way to ever resolve — every reply just asked the same question again.
+    // out), e.g. "#IT-00003 still waiting on this". Matching is deliberately lenient
+    // about punctuation/spacing/case (stripToAlphanumeric) — a citizen typing
+    // "IT-00003", "#it00003", or "it 00003 fyi" all resolve the same way. Without this
+    // match at all, the prompt below had no way to ever resolve — every reply just
+    // asked the same question again.
+    const strippedMessage = stripToAlphanumeric(normalized);
     let ticket = openTickets.length === 1 ? openTickets[0] : null;
     if (!ticket && openTickets.length > 1) {
-      ticket = openTickets.find((t) => normalized.startsWith(t.id.slice(-8).toLowerCase())) ?? null;
+      ticket = openTickets.find((t) => strippedMessage.startsWith(stripToAlphanumeric(ticketReference(t)))) ?? null;
     }
 
     if (!ticket) {
       const list = openTickets
         .slice(0, 5)
-        .map((t) => `• ${t.id.slice(-8)} — ${t.category.name}`)
+        .map((t) => `• ${ticketReference(t)} — ${t.category.name}`)
         .join("\n");
       await sender.send({
         ticketId: null,
@@ -264,7 +275,7 @@ async function processInboundMedia(wamid: string, from: string, message: Inbound
           ? `Hi ${identity.name.split(" ")[0]}, please use this link to submit a grievance or request: ${submissionLink(identity.id)}`
           : `Which ticket is this attachment for? Reply with the reference, then resend the file:\n${openTickets
               .slice(0, 5)
-              .map((t) => `• ${t.id.slice(-8)} — ${t.category.name}`)
+              .map((t) => `• ${ticketReference(t)} — ${t.category.name}`)
               .join("\n")}`;
       await sender.send({ ticketId: null, channel: "WHATSAPP", messageChannelType: "FREETEXT", body, toPhoneNumber: from });
       return;
