@@ -16,7 +16,13 @@ import { UPLOAD_DIR } from "./lib/storage";
 export function createApp() {
   const app = express();
 
-  app.use(cors());
+  // CORS_ALLOWED_ORIGINS unset (local dev) => allow any origin, same as before. Set
+  // (production) => only the listed origins may call the API; a comma-separated list
+  // since the three frontends live on different subdomains.
+  const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS?.split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.use(cors(allowedOrigins ? { origin: allowedOrigins } : undefined));
   app.use(express.json({ verify: captureRawBody }));
   app.use("/uploads", express.static(UPLOAD_DIR));
 

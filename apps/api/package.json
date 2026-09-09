@@ -9,6 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1128.0",
     "@sboss/db": "*",
     "@sboss/shared-types": "*",
     "@sboss/whatsapp-client": "*",
