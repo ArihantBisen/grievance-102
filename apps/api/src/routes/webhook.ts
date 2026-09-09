@@ -4,7 +4,7 @@ import { fetchMetaMedia, getNotificationSender, verifyMetaSignature } from "@sbo
 import { stripToAlphanumeric } from "@sboss/shared-types";
 import { withSystemRls } from "../lib/rls";
 import { asyncHandler } from "../lib/asyncHandler";
-import { LocalDiskStorage } from "../lib/storage";
+import { getStorageBackend } from "../lib/storage";
 
 // The reference shown to a citizen — the real ticket number for a numbered grievance,
 // or the old cuid suffix for a not-yet-numbered (REQUEST) ticket.
@@ -15,7 +15,7 @@ function ticketReference(t: { id: string; ticketNumber: string | null }): string
 export const webhookRouter = Router();
 
 const sender = getNotificationSender();
-const storage = new LocalDiskStorage();
+const storage = getStorageBackend();
 
 const OPEN_STATUSES: TicketStatus[] = [
   "NEW",

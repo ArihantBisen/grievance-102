@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { LocalDiskStorage } from "../lib/storage";
+import { getStorageBackend } from "../lib/storage";
 import { asyncHandler, HttpError } from "../lib/asyncHandler";
 
 export const uploadsRouter = Router();
@@ -21,7 +21,7 @@ const upload = multer({
   },
 });
 
-const storage = new LocalDiskStorage();
+const storage = getStorageBackend();
 
 // POST /api/uploads — multipart/form-data, single "file" field. Citizen-facing, same
 // posture as ticket creation (this happens as part of the website's Attachments step,
